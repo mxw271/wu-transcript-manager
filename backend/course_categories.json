@@ -1,0 +1,11 @@
+{
+    "course_categories": [
+        "Accounting", "Communication", "Curriculum", "Dissertation", "eBiz", "Economics", 
+        "Educ Subjects", "Education Leadership", "Entrepreneurship", "Ethics/Soc Resp", 
+        "Finance", "Hardware", "HR/ORG/Leader", "International Business", "IT General", 
+        "Law", "Legal", "Management", "Marketing", "Networking", "Operations Mgmt", 
+        "Other Business", "Other Education", "Other Education Leadership", "Other IT", 
+        "Programming", "Project Mgmt", "Psychology", "Research/Stats", "Security", 
+        "Strategy", "Telecomm", "TESOL/ESL/TFL"
+    ]
+}
