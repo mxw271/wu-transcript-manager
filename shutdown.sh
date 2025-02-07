@@ -2,20 +2,24 @@
 
 echo "🛑 Stopping WU Transcript Manager..."
 
-# --- 1️⃣ Stop Backend Server ---
-echo "📌 Stopping FastAPI backend..."
-pkill -f "uvicorn main:app" && echo "✅ FastAPI backend stopped." || echo "⚠️ No FastAPI process found."
+# Ensure script runs in the correct directory
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR" || exit
 
-# --- 2️⃣ Stop Frontend Server ---
-echo "📌 Stopping React frontend..."
-pkill -f "node .*react-scripts start" && echo "✅ React frontend stopped." || echo "⚠️ No React frontend process found."
+# --- Stop Frontend Server ---
+echo "📌 Ensuring all React frontend processes are stopped..."
+lsof -ti:3000 | xargs kill -9 && echo "✅ React frontend stopped." || echo "⚠️ No running frontend process found."
 
-# --- 3️⃣ Deactivate Virtual Environment ---
+# --- Stop Backend Server ---
+echo "📌 Ensuring all FastAPI backend processes are stopped..."
+pkill $(lsof -t -i :8000) && echo "✅ FastAPI backend stopped." || echo "⚠️ No running backend process found."
+
+# --- Deactivate Virtual Environment ---
 if [ -d "backend/venv" ]; then
-  echo "📌 Deactivating Python virtual environment..."
-  source backend/venv/bin/activate
-  deactivate
-  echo "✅ Virtual environment deactivated."
+  echo "📌 Ensuring Python virtual environment is properly deactivated..."
+  deactivate 2>/dev/null || echo "⚠️ Virtual environment was not active."
 fi
 
-echo "✅ All servers stopped successfully."
+# --- Completion Messages ---
+echo "✅ All servers stopped successfully! You may now close this window."
+exec bash

@@ -1,30 +1,33 @@
 @echo off
+chcp 65001 >nul
+SETLOCAL ENABLEDELAYEDEXPANSION
+
 echo 🛑 Stopping WU Transcript Manager...
 
-:: --- 1️⃣ Stop Backend Server ---
-echo 📌 Stopping FastAPI backend...
-taskkill /F /IM python.exe /T 2>nul
-if %ERRORLEVEL% EQU 0 (
-    echo ✅ FastAPI backend stopped.
-) else (
-    echo ⚠️ No FastAPI process found.
-)
+:: --- Script Directory Setup --- 
+cd /d "%~dp0"
 
-:: --- 2️⃣ Stop Frontend Server ---
-echo 📌 Stopping React frontend...
-taskkill /F /IM node.exe /T 2>nul
-if %ERRORLEVEL% EQU 0 (
+:: --- Stop Frontend Server ---
+echo 📌 Ensuring all React frontend processes are stopped...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :3000') do (
+    taskkill /F /PID %%a >nul 2>&1
     echo ✅ React frontend stopped.
+) || echo ⚠️ No running frontend process found.
+
+:: --- Stop Backend Server ---
+echo 📌 Ensuring all FastAPI backend processes are stopped...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000') do (
+    taskkill /F /PID %%a >nul 2>&1
+    echo ✅ FastAPI backend stopped.
+) || echo ⚠️ No running backend process found.
+
+:: --- Deactivate Virtual Environment ---
+if exist "backend\venv" (
+    echo 📌 Ensuring Python virtual environment is properly deactivated...
+    call backend\venv\Scripts\deactivate >nul 2>&1
 ) else (
-    echo ⚠️ No React frontend process found.
+    echo ⚠️ Virtual environment was not active.
 )
 
-:: --- 3️⃣ Deactivate Virtual Environment ---
-if exist backend\venv\Scripts\activate (
-    echo 📌 Deactivating Python virtual environment...
-    call backend\venv\Scripts\deactivate 2>nul
-    echo ✅ Virtual environment deactivated.
-)
-
-echo ✅ All servers stopped successfully.
+echo ✅ All servers stopped successfully! You may now close this window.
 pause

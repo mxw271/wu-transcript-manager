@@ -1,52 +1,55 @@
 # WU Transcript Manager
 
-## Overview
+## 🌐 Overview
 This project is a **full-stack web application** for managing and categorizing transcripts. It consists of:
 - **Backend**: FastAPI (Python) with SQLite database
-- **Frontend**: React (Create React App)
+- **Frontend**: React (Pure React)
 - **Machine Learning**: SBERT & OpenAI API for text processing
+- **OCR**: OpenCV & Tesseract for text extraction from PDFs
 
 ---
 
-## Setup Instructions
+## 🚀 Setup Instructions
 
-### **Prerequisites**
-Ensure you have the following installed:
+### 🔧 **Prerequisites**
+Ensure your system meets the following requirements:
 - **Python 3.9+**
 - **Node.js (v18+)**
-- **npm (comes with Node.js)**
-- **virtualenv** (for Python)
+- **npm** (comes with Node.js)
+- **virtualenv** (for Python firtual environment)
+- **Tesseract OCR** (for PDF test extraction)
 
 If missing, the setup script will attempt to install them automatically.
 
-### **Quick Start**
-1️⃣ **Clone the repository**:
+### 📥 **Clone the Repository**
 ```sh
 git clone https://github.com/mxw271/wu-transcript-manager.git
 cd wu-transcript-manager
 ```
 
-2️⃣ **API Key Configuration**:  
+### 🔑 **Update Your API Keys**
 
-**🔑 Update your API keys** in the `backend/.env` file.  
+**Navigate to the backend `.env` file** (located in `backend/.env`).
 
-Navigate to the `backend/` folder and create a `.env` file if it doesn’t exist:
+Replace the placeholders with your **actual API keys**:  
+
 ```sh
-cd backend
-cp .env.example .env  # Creates .env from a template (if available)
+OPENAI_API_KEY=your-openai-api-key
+AZURE_CV_API_KEY=your-azure-computer-vision-api-key
+AZURE_CV_ENDPOINT=your-azure-computer-vision-endpoint
 ```
-Then, open `.env` and replace the placeholders with your actual API keys:  
-- **OpenAI API Key**: Required for transcript processing
-- Azure computer Vision API Key & Endpoint: Optional for transcript processing
+- **OpenAI API Key**: Required for transcript processing.
+- Azure Computer Vision API Key & Endpoint: Optional for transcript processing.
 
-3️⃣ **Run the setup script**:  
+### 🛠️ **Initial Setup (Run Once)**:  
+Run **this step only once** to install dependencies.
 
 🖥 On macOS/Linux Terminal:
 ```sh
 ./setup.sh
 ```
 🖥 On Windows Command Prompt:
-```sh
+```bat
 setup.bat
 ```
 Alternatively, if you use Git Bash or WSL:
@@ -54,55 +57,49 @@ Alternatively, if you use Git Bash or WSL:
 bash setup.sh
 ```
 
-📌 **This will**:
-- Set up a **Python virtual environment** and install required backend packages
-- Install **Node.js dependencies** for the frontend
-- Start both **backend** and **frontend** servers
-
-4️⃣ **Access the web app**:  
-
-Open http://localhost:3000 in your browser
+**📌 This will**:
+- Set up a **Python virtual environment** and install required backend dependencies.
+- Install **Node.js dependencies** for the frontend.
+- Install **OCR dependencies**.
+- **Will not start the servers** (you must run `start.sh` separately)
 
 ---
 
-## Manual Setup (If Scripts Fail)
+## 🚀 Start the App (Run Every Time)
 
-### Backend Setup (FastAPI)
-If the setup script fails, manually set up the backend:
+Ater setup, **use this command every time you want to run the app**.
+
+🖥 On macOS/Linux Terminal:
 ```sh
-cd backend
-python -m venv venv  # Create a virtual environment
-source venv/bin/activate  # Activate virtual environment (macOS/Linux)
-venv\Scripts\activate  # Activate virtual environment (Windows)
-
-pip install -r requirements.txt  # Install dependencies
-uvicorn main:app --reload  # Start FastAPI server
+./start.sh
 ```
-📌 **Backend runs on**: http://localhost:8000
-
-### Frontend Setup (React)
-If the setup script fails, manually set up the frontend:
+🖥 On Windows Command Prompt:
+```bat
+start.bat
+```
+Alternatively, if you use Git Bash or WSL:
 ```sh
-cd frontend
-npx create-react-app my-app  # Install React app
-cd my-app
-npm install  # Install dependencies
-npm start  # Start frontend
+bash start.sh
 ```
-📌 **Frontend runs on**: http://localhost:3000
+
+**📌 This will**:
+- Activate the **Python virtual environment**.
+- Start the **FastAPI backend** (http://localhost:8000).
+- Start the **React frontend** (http://localhost:3000).
+- Keeps the terminal open to prevent accidental closure.
 
 ---
 
-## Shutdown Instructions
+## 🛑 Shutdown the App
 
-To **properly stop** the backend, frontend, and virtual environment, run:  
+To **properly stop the servers**, run:  
 
 🖥 On macOS/Linux Terminal:
 ```sh
 ./shutdown.sh
 ```
 🖥 On Windows Command Prompt:
-```sh
+```bat
 shutdown.bat
 ```
 Alternatively, if you use Git Bash or WSL:
@@ -110,34 +107,38 @@ Alternatively, if you use Git Bash or WSL:
 bash shutdown.sh
 ```
 
-📌 **This will**:
+**📌 This will**:
+- Stop **React frontend**
 - Stop **FastAPI backend**
-- Stop **Vite frontend**
 - Deactivate **Python virtual environment**
 
 ---
 
-## Additional Notes
+## 💡 Additional Notes
 
-- **Backend runs on**: http://localhost:8000
-- **Frontend runs on**: http://localhost:3000
 - If you **encounter permission issues**:
     🖥 On macOS/Linux Terminal:
     ```sh
-    chmod +x setup.sh shutdown.sh
+    chmod +x setup.sh start.sh shutdown.sh
     ```
     🖥 On Windows Command Prompt:
+    ```bat
+    icacls setup.bat /grant %USERNAME%:F
+    icacls start.bat /grant %USERNAME%:F
+    icacls shutdown.bat /grant %USERNAME%:F
+    ```
+    Alternatively, if you use Git Bash or WSL:
     ```sh
-    chmod +x setup.bat shutdown.bat
+    chmod +x setup.bat start.sh shutdown.bat
     ```
     to make the scripts executable.
-- If you need to **reinstall dependencies**, delete the venv/ directory and node_modules/, then rerun setup.sh or setup.bat.
+- If you need to **reinstall dependencies**, delete the `venv/` directory and `node_modules/`, then rerun `setup.sh` or `setup.bat`.
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
 Feel free to submit pull requests, issues, or feature suggestions!
 
-📧 **Contact**: s.tehrani@westcliff.edu
+**📧 Contact**: s.tehrani@westcliff.edu
 
