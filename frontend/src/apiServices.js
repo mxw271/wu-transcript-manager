@@ -40,6 +40,7 @@ export const uploadFile = async (file, onProgress) => {
   }
 };
 
+
 /**
  * Search data in the backend
  * @param {Object} criteria - The search criteria
@@ -53,70 +54,10 @@ export const searchData = async (criteria) => {
       course_category: criteria.courseCategory,
       education_level: criteria.educationLevel,
     });
+    console.log(response)
     return response.data;
   } catch (error) {
     console.error('Error searching data:', error);
     throw error;
   }
-};
-
-/**
- * Download data as a CSV file
- * @param {Object} criteria - The search criteria
- * @returns {Promise<void>} - Triggers a file download
- */
-export const downloadData = async (criteria) => {
-  try {
-    const response = await axios.post(`${API_URL}/download`, criteria, { 
-      responseType: 'blob',
-      headers: { 
-        Accept: 'text/csv', 
-        'Content-Type': 'application/json'
-      },
-    });
-
-    // Extract filename from Content-Disposition header
-    const contentDisposition = response.headers['content-disposition'];
-    let fileName = "Queried_Transcript.csv"; // Default filename
-
-    if (contentDisposition) {
-      const match = contentDisposition.match(/filename\*=UTF-8''(.+)/);
-      if (match) {
-        fileName = decodeURIComponent(match[1]); 
-      } else {
-        const fallbackMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-        if (fallbackMatch) {
-          fileName = fallbackMatch[1];
-        }
-      }
-    }
-
-    // Create a blob and generate a URL
-    const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv' }));
-
-    // Create and trigger a download link
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', fileName);
-    document.body.appendChild(link);
-    link.click();
-
-    // Clean up by removing the link
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url); // Free up memory
-  } catch (error) {
-    console.error('Error downloading data:', error);
-    throw error;
-  }
-};
-
-/**
- * Handle API errors gracefully by logging and displaying an alert to the user.
- * @param {Object} error - Axios error object.
- * @param {string} action - Description of the action that failed.
- */
-export const handleApiError = (error, action) => {
-  console.error(`Error with ${action}:`, error);
-  const message = error.response?.data?.message || 'An unexpected error occurred.';
-  alert(`Failed ${action}: ${message}`);
 };
