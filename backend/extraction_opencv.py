@@ -87,4 +87,10 @@ def extract_text_from_pdf_using_opencv(pdf_path, image_output_dir):
         text = pytesseract.image_to_string(binary_image)
         extracted_text += text + "\n"
 
+    # Delete images after processing
+    print("Deleting images...")
+    for image_name in images:
+        image_path = os.path.join(image_output_dir, image_name)
+        os.remove(image_path)
+       
     return extracted_text

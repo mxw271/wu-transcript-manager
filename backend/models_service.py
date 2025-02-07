@@ -21,7 +21,6 @@ def get_openai_client():
     """
     # Load API key from .env
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  
-    print(OPENAI_API_KEY)
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY is not set. Check your .env file.")
 
@@ -44,10 +43,10 @@ def get_Azure_client():
     Lazily initializes and caches the Azure Computer Vision API client.
     """
     # Load API key and endpoint from .env
-    AZURE_API_KEY = os.getenv("AZURE_API_KEY")  
-    AZURE_ENDPOINT = os.getenv("AZURE_ENDPOINT")
-    if not AZURE_API_KEY  or not AZURE_ENDPOINT:
-        raise ValueError("AZURE_API_KEY or AZURE_ENDPOINT is not set. Check your .env file.")
+    AZURE_CV_API_KEY = os.getenv("AZURE_CV_API_KEY")  
+    AZURE_CV_ENDPOINT = os.getenv("AZURE_CV_ENDPOINT")
+    if not AZURE_CV_API_KEY  or not AZURE_CV_ENDPOINT:
+        raise ValueError("AZURE_CV_API_KEY or AZURE_CV_ENDPOINT is not set. Check your .env file.")
 
-    return ComputerVisionClient(AZURE_ENDPOINT, CognitiveServicesCredentials(AZURE_API_KEY))
+    return ComputerVisionClient(AZURE_CV_ENDPOINT, CognitiveServicesCredentials(AZURE_CV_API_KEY))
 

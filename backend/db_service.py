@@ -176,7 +176,6 @@ def query_transcripts(conn: Connection, criteria: dict) -> list:
     ''' 
 
     params = []
-    print(criteria.get("educator_name"), criteria.get("course_category"), criteria.get("education_level"))
 
     # Filtering by educator name
     if criteria.get("educator_name"):
@@ -185,14 +184,14 @@ def query_transcripts(conn: Connection, criteria: dict) -> list:
 
     # Filtering by course category
     if criteria.get("course_category"):
-        query += " AND wu_categorized_courses.should_be_category = ?"
+        query += " AND courses.should_be_category = ?"
         params.append(criteria["course_category"])
 
     # Filtering by education level
     if criteria.get("education_level") and isinstance(criteria["education_level"], list):
         placeholders = ", ".join(["?" for _ in criteria["education_level"]])  # Create correct number of placeholders
         query += f" AND transcripts.degree_level IN ({placeholders})"
-        params.append(criteria["education_level"])
+        params.extend(criteria["education_level"])
 
     cursor = conn.cursor()
     cursor.execute(query, params)

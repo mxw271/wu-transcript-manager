@@ -15,7 +15,7 @@ import os
 from dotenv import load_dotenv
 import json
 import pandas as pd
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from models_service import get_openai_client
 from process_categories import load_course_categories
@@ -24,13 +24,6 @@ from db_service import insert_educator, insert_transcript, insert_course, query_
 
 
 app = FastAPI()
-
-
-# Load environment variables from .env file
-DOTENV_PATH = os.path.join(os.path.dirname(__file__), ".env")  # Ensure correct path
-load_dotenv(DOTENV_PATH)
-DATABASE_FILE = os.getenv("DATABASE_FILE") # Load Database file from .env
-
 
 # Allow CORS for all origins (for development purposes)
 app.add_middleware(
@@ -43,6 +36,12 @@ app.add_middleware(
 )
 
 
+# Load environment variables from .env file
+DOTENV_PATH = os.path.join(os.path.dirname(__file__), ".env")  # Ensure correct path
+load_dotenv(DOTENV_PATH)
+DATABASE_FILE = os.getenv("DATABASE_FILE") # Load Database file from .env
+
+
 UPLOAD_FOLDER = './uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -51,7 +50,7 @@ ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
 MAX_FILES = 300
 
 
-# Check if the file extension is allowed
+# Function to check if the file extension is allowed
 def is_allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -70,11 +69,12 @@ def get_db_connection():
     return conn
 
 
-# Generate a summary DataFrame
-def generate_summary_df(df: pd.DataFrame, categories_file: str = "course_categories.json") -> pd.DataFrame:
+# Function to generate a summary DataFrame
+def generate_summary_df(criteria_dict: Dict, df: pd.DataFrame, categories_file: str = "course_categories.json") -> pd.DataFrame:
     """
     Generates a summary DataFrame with unique course categories and corresponding course details.
     Args:
+        criteria_dict (dict): Dictionary containing search criteria.
         df (pd.DataFrame): Input DataFrame containing course data.
         categories_file (str): Path to the JSON file containing course categories.
     Returns:
@@ -89,7 +89,13 @@ def generate_summary_df(df: pd.DataFrame, categories_file: str = "course_categor
 
     # Populate category_mapping with course details
     for _, row in df.iterrows():
-        formatted_course = f"{row['Course Name']} ({row['Degree']} - {row['Adjusted Credits Earned']} credits)"
+        # Determine formatted course string based on criteria_dict["educator_name"]
+        if criteria_dict.get("educator_name"): 
+            formatted_course = f"{row['Course Name']} ({row['Degree']} - {row['Adjusted Credits Earned']} credits)"
+        else:  # If educator_name is empty, include educator name
+            formatted_course = f"{row['Educator Name']}: {row['Course Name']} ({row['Degree']} - {row['Adjusted Credits Earned']} credits)"
+        
+        # Assign course to correct category or "Uncategorized"
         category = row["Course Category"] if row["Course Category"] in unique_categories else "Uncategorized"
         category_mapping[category].append(formatted_course)
 
@@ -108,9 +114,10 @@ def generate_summary_df(df: pd.DataFrame, categories_file: str = "course_categor
     # Sort the DataFrame
     summary_df_sorted = summary_df.sort_values(
         by=["Category", "Course Details"],
-        key=lambda col: col.str.lower() if col.name == "Category" else col,
+        key=lambda col: col.str.lower() if col.name in ["Category", "Course Details"] else col,
         ascending=[True, True]
     ).reset_index(drop=True)
+
 
     return summary_df_sorted
 
@@ -186,68 +193,23 @@ def search_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)
 
     try:
         results = query_transcripts(conn, criteria_dict)
+        print(results)
         if not results:
             raise HTTPException(status_code=404, detail="No transcripts found")
 
         # Convert to Pandas DataFrame
         df = pd.DataFrame(results, columns=["Educator Name", "Degree", "Degree Level", "Course Name", "Course Category", "Adjusted Credits Earned"])
-
+    
         # Generate a summary DataFrame
-        summary_df = generate_summary_df(df)
-        print(summary_df)
+        summary_df = generate_summary_df(criteria_dict, df)
 
     finally:
         cursor.close()
         conn.close()  # Ensure the database connection is closed
 
+
     return JSONResponse(content={
         "queried_data": summary_df.to_dict(orient="records"),
-        "educator_name": df["Educator Name"].iloc[0] if not df.empty else "Unknown",
-        "notes": "Note: A course with 0 credits may fall into one of the following cases: 1. The course is not an actual academic course but is designed for administrative or tracking purposes. 2. The educator did not pass the course."
+        "educator_name": df["Educator Name"].iloc[0] if not df.empty and criteria_dict.get("educator_name") else "",
+        "notes": "Note: A course with 0 credit may fall into one of the following cases: 1. The course is not an actual academic course but is designed for administrative or tracking purposes. 2. The educator did not pass the course."
     })
-
-
-@app.post("/download")
-def download_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)):
-    """
-    Queries transcript data and generates a CSV file for download.
-    """
-    criteria_dict = criteria.model_dump()
-    cursor = conn.cursor()
-    
-    try:
-        results = query_transcripts(conn, criteria_dict)
-        if not results:
-            raise HTTPException(status_code=404, detail="No transcripts found")
-    
-        # Convert to Pandas DataFrame
-        df = pd.DataFrame(results, columns=["Educator Name", "Degree", "Degree Level", "Course Name", "Course Category", "Adjusted Credits Earned"])
-
-        # Generate a summary DataFrame
-        summary_df = generate_summary_df(df)
-
-        # Extract Educator Name for filename (default fallback if not available)
-        educator_name = df["Educator Name"].iloc[0] if not df.empty else "Transcript"
-
-        # Create filename
-        filename = f"{educator_name} Qualification Worksheet.csv"
-
-        # Convert DataFrame to CSV in-memory (instead of writing to disk)
-        csv_stream = summary_df.to_csv(index=False)
-
-        headers = {
-            "Content-Disposition": f"attachment; filename={filename}",
-            "Content-Type": "text/csv",
-        }
-        print("Sending headers:", headers)
-        print(filename) 
-
-    finally:
-        conn.close()  # Ensure the database connection is closed
-
-    print("sending csv stream")
-    return StreamingResponse(
-        iter([csv_stream]), 
-        media_type="text/csv",
-        headers=headers
-    )

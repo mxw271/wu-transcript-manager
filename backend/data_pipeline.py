@@ -6,6 +6,7 @@ import csv
 import json
 from typing import Dict, Any, List
 import time
+import traceback
 
 from models_service import get_openai_client
 from process_categories import load_course_categories
@@ -38,22 +39,6 @@ GRADE_RANKING = {
     "D+": 4, "D": 3, "D-": 2,
     "F": 1
 }
-
-
-# Function to drop tables
-def drop_tables(database_file):
-    connection = sqlite3.connect(database_file)
-    cursor = connection.cursor()
-
-    # Drop tables if they exist
-    tables = ["wu_educators", "transcripts", "courses", "wu_categorized_courses", "wu_categorized_transcripts"]
-    for table in tables:
-        cursor.execute(f"DROP TABLE IF EXISTS {table}")
-        #print(f"Table {table} dropped successfully.")
-
-    connection.commit()
-    connection.close()
-
 
 # Function to format names from "lastname, firstname" to "firstname lastname"
 def format_name(name):
@@ -121,34 +106,57 @@ def calculate_adjusted_credits(
 
 # Step 1: Extract data from the file 
 def extract_data(file_path: str) -> pd.DataFrame:
-    extracted_text = extract_text_from_pdf_using_opencv(file_path, OUTPUT_FOLDER)
-    
-    # Save the text to a .csv file
-    extracted_text_path = os.path.join(OUTPUT_FOLDER, "extracted_text_opencv.csv")
-    with open(extracted_text_path, "w", newline="", encoding="utf-8") as csv_file:
-        csv_writer = csv.writer(csv_file)
-        csv_writer.writerow(["Line"])  # Add a header
-        for line in extracted_text.splitlines():
-            csv_writer.writerow([line])
+    try:
+        # Extract text from PDF
+        print("📄 Extracting text from PDF...")
+        extracted_text = extract_text_from_pdf_using_opencv(file_path, OUTPUT_FOLDER)
+        if not extracted_text:
+            raise ValueError("Extracted text is empty. PDF may not contain valid text.")
 
-    # Process the text using OpenAI API
-    json_data = generate_json_data_using_openai(extracted_text, get_openai_client())
+        # Save the text to a .csv file
+        extracted_text_path = os.path.join(OUTPUT_FOLDER, "extracted_text_opencv.csv")
+        with open(extracted_text_path, "w", newline="", encoding="utf-8") as csv_file:
+            csv_writer = csv.writer(csv_file)
+            csv_writer.writerow(["Line"])  # Add a header
+            for line in extracted_text.splitlines():
+                csv_writer.writerow([line])
+        print(f"Extracted text saved to: {extracted_text_path}")
 
-    # Format the data to a DataFrame
-    formatted_df = json_data_to_dataframe(json_data)
+        # Process the text using OpenAI API
+        print("Sending extracted text to OpenAI API for processing...")
+        openai_client = get_openai_client()
+        json_data = generate_json_data_using_openai(extracted_text, openai_client)
+        if not json_data:
+            raise ValueError("OpenAI response is empty. Check API request and input text.")
+        print("OpenAI API response received:", json.dumps(json_data, indent=4))
 
-    # Add the file name to the DataFrame
-    formatted_df["file_name"] = os.path.basename(file_path)
+        # Format the data to a DataFrame
+        print("Formatting data into a DataFrame...")
+        formatted_df = json_data_to_dataframe(json_data)
+        if formatted_df is None or formatted_df.empty:
+            raise ValueError("Formatted DataFrame is empty. OpenAI response might be incorrect.")
 
-    # Save the formatted data to a new CSV file
-    formatted_table_path = os.path.join(OUTPUT_FOLDER, "formatted_table_openai.csv")
-    if not formatted_df.empty:
+        # Add the file name to the DataFrame
+        formatted_df["file_name"] = os.path.basename(file_path)
+
+        # Save the formatted data to a new CSV file
+        formatted_table_path = os.path.join(OUTPUT_FOLDER, "formatted_table_openai.csv")
         formatted_df.to_csv(formatted_table_path, index=False, encoding="utf-8")
         print(f"Formatted transcript saved to: {formatted_table_path}")
-    else:
-        print("No valid data to save. Check OpenAI response.")
+       
+        return formatted_df
+    
+    except Exception as e:
+        error_message = f"Error extracting data from file: {str(e)}"
+        print(error_message)
+        print(traceback.format_exc())  # Print full traceback for debugging
 
-    return formatted_df
+        return {
+            "status": "error",
+            "message": error_message,
+            "details": traceback.format_exc(),
+            "file": file_path
+        }
 
 
 # Step 2: Validate extracted data 
@@ -274,17 +282,6 @@ def save_to_db(df: pd.DataFrame, database_file: str) -> pd.DataFrame:
             row.get("credits_earned"),
             row.get("grade"),
         )
-
-        # Check and insert rows only if category is valid
-        '''
-        if row.get("should_be_category") and row.get("should_be_category") != "Uncategorized":
-            insert_cateogrized_course(
-                conn,
-                course_id,
-                transcript_id,
-                row.get("should_be_category")
-            )
-        '''
     
     # Commit changes and close connection
     conn.commit()
@@ -316,15 +313,33 @@ def process_file(file_path: str, database_file: str):
         # Return invalid data
         return {"filename": os.path.basename(file_path), "status": "Invalid", "content": ""}
     '''
-    #drop_tables(database_file)
-    create_tables(database_file)
+    try:
+        # Create tables
+        print("Creating tables...")
+        create_tables(database_file)
 
-    # Extract data 
-    extracted_df = extract_data(file_path)
+        # Extract data 
+        print("Extracting data from:", file_path)
+        extracted_df = extract_data(file_path)
+        if extracted_df is None or extracted_df.empty:
+            raise ValueError("Extracted data is empty. Please check the input file.")
 
-    # Structure the data
-    structured_df = structure_data(extracted_df)
+        # Structure the data
+        print("Structuring extracted data...")
+        structured_df = structure_data(extracted_df)
+        if structured_df is None or structured_df.empty:
+            raise ValueError("Structured data is empty after processing.")
 
-    # Save the data to the database
-    save_to_db(structured_df, database_file)
+        # Save the data to the database
+        print("Saving structured data to the database...")
+        save_to_db(structured_df, database_file)
 
+        print("File processed successfully!")
+        return {"status": "success", "message": "File processed and saved to the database successfully."}
+
+    except Exception as e:
+        error_message = f"Error processing file: {str(e)}"
+        print(error_message)
+        print(traceback.format_exc())  # Print full error traceback for debugging
+
+        return {"status": "error", "message": error_message, "details": traceback.format_exc()}
