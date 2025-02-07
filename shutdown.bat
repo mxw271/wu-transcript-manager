@@ -22,9 +22,10 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000') do (
 ) || echo ⚠️ No running backend process found.
 
 :: --- Deactivate Virtual Environment ---
+echo 📌 Ensuring Python virtual environment is properly deactivated...
 if exist "backend\venv" (
-    echo 📌 Ensuring Python virtual environment is properly deactivated...
     call backend\venv\Scripts\deactivate >nul 2>&1
+    echo ✅ Virtual environment stopped.
 ) else (
     echo ⚠️ Virtual environment was not active.
 )

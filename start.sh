@@ -18,6 +18,7 @@ if lsof -i :8000 >/dev/null 2>&1; then
   kill -9 $(lsof -t -i :8000)
 fi
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload & 
+sleep 8
 
 # --- Start Frontend Server --- 
 echo "🌐 Starting React frontend..."
@@ -27,11 +28,12 @@ if lsof -i :3000 >/dev/null 2>&1; then
   kill -9 $(lsof -t -i :3000)
 fi
 npm start & 
+sleep 5
 
 # --- Completion Messages ---
-echo "🚀 Servers are running! Access the web app at: http://localhost:3000" && sleep 10
-echo "🔄 Leave this window open." && sleep 5
-echo "🛑 To stop everything, run: './shutdown.sh' or press Ctrl + C to exit manually." && sleep 1
+echo "🚀 Servers are running! Access the web app at: http://localhost:3000"
+echo "🔄 Leave this window open."
+echo "🛑 To stop everything, run: './shutdown.sh' or press Ctrl + C to exit manually." 
 
 # Keep the window open
 tail -f /dev/null

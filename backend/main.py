@@ -193,7 +193,6 @@ def search_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)
 
     try:
         results = query_transcripts(conn, criteria_dict)
-        print(results)
         if not results:
             raise HTTPException(status_code=404, detail="No transcripts found")
 
