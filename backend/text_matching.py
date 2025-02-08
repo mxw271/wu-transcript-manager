@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
-from models_service import get_openai_client, get_sbert_model
+from clients_service import get_openai_client, get_sbert_model
 
 # Set a similarity threshold for SBERT
 THRESHOLD = 0.7  # Matches below this threshold will be marked as "Uncategorized"

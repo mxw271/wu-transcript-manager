@@ -8,7 +8,7 @@ from typing import Dict, Any, List
 import time
 import traceback
 
-from models_service import get_openai_client
+from clients_service import get_openai_client
 from process_categories import load_course_categories
 from extraction_opencv import extract_text_from_pdf_using_opencv
 from extraction_azure import extract_text_from_file_using_azure

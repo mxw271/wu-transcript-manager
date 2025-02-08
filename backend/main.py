@@ -17,7 +17,7 @@ import json
 import pandas as pd
 from typing import Dict, List, Optional
 
-from models_service import get_openai_client
+from clients_service import get_openai_client
 from process_categories import load_course_categories
 from data_pipeline import process_file
 from db_service import insert_educator, insert_transcript, insert_course, query_transcripts
