@@ -129,7 +129,7 @@ bash shutdown.sh
     ```
     Alternatively, if you use Git Bash or WSL:
     ```sh
-    chmod +x setup.bat start.sh shutdown.bat
+    chmod +x setup.sh start.sh shutdown.sh
     ```
     to make the scripts executable.
 - If you need to **reinstall dependencies**, delete the `venv/` directory and `node_modules/`, then rerun `setup.sh` or `setup.bat`.
