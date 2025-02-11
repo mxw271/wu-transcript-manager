@@ -15,6 +15,7 @@ import os
 from dotenv import load_dotenv
 import json
 import pandas as pd
+import traceback
 from typing import Dict, List, Optional
 
 from clients_service import get_openai_client
@@ -47,17 +48,27 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
 ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB in bytes
 MAX_FILES = 300
 
 
 # Function to check if the file extension is allowed
-def is_allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+def is_allowed_file(file):
+    # Check if the file has an allowed extension
+    if not ("." in file.filename and file.filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS):
+        return False
+
+    # Check if the file size is within the limit
+    if file.size > MAX_FILE_SIZE:
+        return False
+
+    return True
 
 
 # Define search request schema
 class SearchCriteria(BaseModel):
-    educator_name: Optional[str] = None
+    educator_firstName: Optional[str] = None
+    educator_lastName: Optional[str] = None
     course_category: Optional[str] = None
     education_level: List[str] = []
 
@@ -67,6 +78,11 @@ def get_db_connection():
     conn = sqlite3.connect(DATABASE_FILE)#, check_same_thread=False)  # Allow cross-thread access
     conn.row_factory = sqlite3.Row
     return conn
+
+
+# Function to format educator's full name
+def format_name(first, middle, last):
+    return f"{first} {middle + ' ' if pd.notna(middle) and middle.strip() else ''}{last}"
 
 
 # Function to generate a summary DataFrame
@@ -89,11 +105,13 @@ def generate_summary_df(criteria_dict: Dict, df: pd.DataFrame, categories_file: 
 
     # Populate category_mapping with course details
     for _, row in df.iterrows():
-        # Determine formatted course string based on criteria_dict["educator_name"]
-        if criteria_dict.get("educator_name"): 
+        # Determine formatted course string based on criteria_dict["educator_firstName"] & criteria_dict["educator_lastName"]
+        """if criteria_dict.get("educator_firstName") and criteria_dict.get("educator_lastName"): 
             formatted_course = f"{row['Course Name']} ({row['Degree']} - {row['Adjusted Credits Earned']} credits)"
-        else:  # If educator_name is empty, include educator name
-            formatted_course = f"{row['Educator Name']}: {row['Course Name']} ({row['Degree']} - {row['Adjusted Credits Earned']} credits)"
+        else:  # Include educator name
+            formatted_course = f"{format_name(row['Educator FirstName'], row['Educator MiddleName'], row['Educator LastName'])}: {row['Course Name']} ({row['Degree']} - {row['Adjusted Credits Earned']} credits)"
+        """
+        formatted_course = f"{row['Course Name']} ({row['Degree']} - {row['Adjusted Credits Earned']} credits - {format_name(row['Educator FirstName'], row['Educator MiddleName'], row['Educator LastName'])})"
         
         # Assign course to correct category or "Uncategorized"
         category = row["Course Category"] if row["Course Category"] in unique_categories else "Uncategorized"
@@ -130,57 +148,69 @@ def get_course_categories():
 
 @app.post("/upload")
 async def upload_files(files: List[UploadFile] = File(...)):
+    """
+    Handles file uploads, validates files, and processes them.
+    Returns a JSON response with success and error details for each file.
+    """
     # Validate file amounts
     if len(files) > MAX_FILES:
-        raise HTTPException(
-            status_code=400, detail=f"Too many files uploaded. Maximum allowed is {MAX_FILES}."
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": f"Too many files uploaded. Maximum allowed is {MAX_FILES}."
+            } 
         )
-
-    # Validate file formats
-    for file in files:
-        if not is_allowed_file(file.filename):
-            raise HTTPException(
-                status_code=400, detail=f"File format not allowed: {file.filename}"
-            )
 
     processed_results = []
 
     # Process files one by one if no more than 100
-    if len(files) <= 100:
-        for file in files:
-            if not is_allowed_file(file.filename):
-                raise HTTPException(
-                    status_code=400, detail=f"File format not allowed: {file.filename}"
-                )
+    for file in files:
+        file_result = {"filename": file.filename}
+
+        try:
+            # Validate file formats
+            if not is_allowed_file(file):
+                file_result["status"] = "error"
+                file_result["message"] = f"File format not allowed: {file.filename}"
+                processed_results.append(file_result)
+                continue 
+
+            # Save file to server
             file_location = os.path.join(UPLOAD_FOLDER, file.filename)
             with open(file_location, "wb") as f:
                 f.write(await file.read())
-            #processed_results.append(process_file(file_location, DATABASE_FILE))
-            process_file(file_location, DATABASE_FILE)
+            print(f"✅ File saved successfully: {file_location}")
 
-    # Process files in batches of 10 if more than 100
-    else:
-        for i in range(0, len(files), 10):
-            batch = files[i:i + 10]
-            for file in batch:
-                if not is_allowed_file(file.filename):
-                    raise HTTPException(
-                        status_code=400, detail=f"File format not allowed: {file.filename}"
-                    )
-                file_location = os.path.join(UPLOAD_FOLDER, file.filename)
-                with open(file_location, "wb") as f:
-                    f.write(await file.read())
-                #processed_results.append(process_file(file_location, DATABASE_FILE))
-                process_file(file_location, DATABASE_FILE)
-    
-    # Return the processed data to the frontend            
+            # Process the file
+            print(f"Processing file: {file.filename}...")
+            process_result = process_file(file_location, DATABASE_FILE)
+
+            if process_result["status"] == "error":
+                file_result["status"] = "error"
+                file_result["message"] = process_result["message"]
+                file_result["details"] = process_result.get("details", "")
+            else:
+                file_result["status"] = "success"
+                file_result["message"] = "File processed successfully."
+
+        except Exception as e:
+            error_details = traceback.format_exc()
+            print(f"Error processing {file.filename}: {e}")  # Log error in backend
+            file_result["status"] = "error"
+            file_result["message"] = f"Unexpected error while processing {file.filename}: {str(e)}"
+            file_result["details"] = error_details
+        
+        processed_results.append(file_result)
+
+    # Return structured JSON response for all files
     return JSONResponse(content={"processed_files": processed_results})
 
 
 @app.post("/search")
 def search_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)):
     """
-    Searches transcripts based on educator name, course category, or both.
+    Searches transcripts based on educator name, course category, degree level.
     Args:
         criteria (SearchCriteria): Search parameters.
         conn (Connection): Database connection object.
@@ -189,15 +219,19 @@ def search_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)
     """
     criteria_dict = criteria.model_dump()
     cursor = conn.cursor()
-    print(criteria_dict.get("educator_name"), criteria_dict.get("course_category"), criteria_dict.get("education_level"))
+    print(criteria_dict.get("educator_firstName"), criteria_dict.get("educator_lastName"), criteria_dict.get("course_category"), criteria_dict.get("education_level"))
 
     try:
         results = query_transcripts(conn, criteria_dict)
         if not results:
-            raise HTTPException(status_code=404, detail="No transcripts found")
+            return {
+                "status": "success",
+                "message": "No transcripts found for the given criteria.",
+                "data": []
+            }
 
         # Convert to Pandas DataFrame
-        df = pd.DataFrame(results, columns=["Educator Name", "Degree", "Degree Level", "Course Name", "Course Category", "Adjusted Credits Earned"])
+        df = pd.DataFrame(results, columns=["Educator FirstName", "Educator MiddleName", "Educator LastName", "Degree", "Degree Level", "Course Name", "Course Category", "Adjusted Credits Earned"])
     
         # Generate a summary DataFrame
         summary_df = generate_summary_df(criteria_dict, df)
@@ -206,9 +240,16 @@ def search_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)
         cursor.close()
         conn.close()  # Ensure the database connection is closed
 
-
     return JSONResponse(content={
-        "queried_data": summary_df.to_dict(orient="records"),
-        "educator_name": df["Educator Name"].iloc[0] if not df.empty and criteria_dict.get("educator_name") else "",
-        "notes": "Note: A course with 0 credit may fall into one of the following cases: 1. The course is not an actual academic course but is designed for administrative or tracking purposes. 2. The educator did not pass the course."
+        "queried_data": summary_df.to_dict(orient="records") if results else [],
+        "educator_name": (
+            f"{df['Educator FirstName'].iloc[0]} {df['Educator LastName'].iloc[0]}"
+            if not df.empty and criteria_dict.get("educator_firstName") and criteria_dict.get("educator_lastName") 
+            else ""
+        ) if results else "",
+        "message": "Transcripts retrieved successfully." if results else "No transcripts found for the given search criteria.",
+        "notes": """Note: A course with 0 credit may fall into one of the following cases: 
+                    1. The course is not an actual academic course but is designed for administrative or tracking purposes. 
+                    2. The educator did not pass the course.
+                 """ if results else ""
     })

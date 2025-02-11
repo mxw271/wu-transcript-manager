@@ -15,7 +15,7 @@ from extraction_azure import extract_text_from_file_using_azure
 from formatting_openai import generate_json_data_using_openai, json_data_to_dataframe
 from text_matching import match_courses_using_sbert
 from db_create_tables import create_tables 
-from db_service import insert_educator, insert_transcript, insert_course, insert_cateogrized_course, insert_categorized_transcript
+from db_service import insert_educator, insert_transcript, insert_course
 
 
 # Specify the output directory
@@ -40,14 +40,6 @@ GRADE_RANKING = {
     "F": 1
 }
 
-# Function to format names from "lastname, firstname" to "firstname lastname"
-def format_name(name):
-    if "," in name:
-        parts = name.split(",", 1)  
-        return parts[1].strip() + " " + parts[0].strip()  
-    return name.strip()
-
-
 # Function to categorize degree levels
 def categorize_degree(degree: str) -> str:
     """
@@ -58,7 +50,7 @@ def categorize_degree(degree: str) -> str:
         str: The categorized degree level.
     """
     if pd.isna(degree):
-        return "unknown"
+        return "Unknown"
 
     degree = degree.lower()
     if any(word in degree for word in ["phd", "doctor", "md", "dnp", "dr"]):
@@ -68,7 +60,7 @@ def categorize_degree(degree: str) -> str:
     elif any(word in degree for word in ["bachelor", "bs", "ba", "b.ed", "bba", "bsc"]):
         return "Bachelor"
     else:
-        return "unknown"
+        return "Unknown"
 
 
 # Function to determine adjusted credits
@@ -108,10 +100,15 @@ def calculate_adjusted_credits(
 def extract_data(file_path: str) -> pd.DataFrame:
     try:
         # Extract text from PDF
-        print("📄 Extracting text from PDF...")
+        print("Extracting text from PDF...")
         extracted_text = extract_text_from_pdf_using_opencv(file_path, OUTPUT_FOLDER)
         if not extracted_text:
-            raise ValueError("Extracted text is empty. PDF may not contain valid text.")
+            return {
+                "status": "error",
+                "message": "Extracted text is empty. PDF may not contain valid text.",
+                "details": "Ensure the PDF contains readable text, not just images.",
+                "file": file_path
+            }
 
         # Save the text to a .csv file
         extracted_text_path = os.path.join(OUTPUT_FOLDER, "extracted_text_opencv.csv")
@@ -120,21 +117,31 @@ def extract_data(file_path: str) -> pd.DataFrame:
             csv_writer.writerow(["Line"])  # Add a header
             for line in extracted_text.splitlines():
                 csv_writer.writerow([line])
-        print(f"Extracted text saved to: {extracted_text_path}")
+        print(f"✅ Extracted text saved to: {extracted_text_path}")
 
         # Process the text using OpenAI API
         print("Sending extracted text to OpenAI API for processing...")
         openai_client = get_openai_client()
         json_data = generate_json_data_using_openai(extracted_text, openai_client)
         if not json_data:
-            raise ValueError("OpenAI response is empty. Check API request and input text.")
+            return {
+                "status": "error",
+                "message": "OpenAI response is empty. Check API request and input text.",
+                "details": "Possible issues: API timeout, invalid input text, or authentication failure.",
+                "file": file_path
+            }
         print("OpenAI API response received:", json.dumps(json_data, indent=4))
 
         # Format the data to a DataFrame
         print("Formatting data into a DataFrame...")
         formatted_df = json_data_to_dataframe(json_data)
         if formatted_df is None or formatted_df.empty:
-            raise ValueError("Formatted DataFrame is empty. OpenAI response might be incorrect.")
+            return {
+                "status": "error",
+                "message": "Formatted DataFrame is empty. OpenAI response might be incorrect.",
+                "details": "Check if the extracted text is properly structured before sending to OpenAI.",
+                "file": file_path
+            }
 
         # Add the file name to the DataFrame
         formatted_df["file_name"] = os.path.basename(file_path)
@@ -142,15 +149,14 @@ def extract_data(file_path: str) -> pd.DataFrame:
         # Save the formatted data to a new CSV file
         formatted_table_path = os.path.join(OUTPUT_FOLDER, "formatted_table_openai.csv")
         formatted_df.to_csv(formatted_table_path, index=False, encoding="utf-8")
-        print(f"Formatted transcript saved to: {formatted_table_path}")
+        print(f"✅ Formatted transcript saved to: {formatted_table_path}")
        
-        return formatted_df
+        return {"status": "success", "message": "Data extracted successfully.", "data": formatted_df}
     
     except Exception as e:
         error_message = f"Error extracting data from file: {str(e)}"
         print(error_message)
         print(traceback.format_exc())  # Print full traceback for debugging
-
         return {
             "status": "error",
             "message": error_message,
@@ -183,11 +189,6 @@ def structure_data(df: pd.DataFrame) -> pd.DataFrame:
     print("Expanding abbreviations and matching courses...")
     df["course_name_lowercase"] = df["course_name"].astype(str).str.lower()
     df["should_be_category"] = match_courses_using_sbert(df["course_name_lowercase"].tolist(), categories_list)  
-
-    print(df["name"].unique())
-    # Format names
-    df["name"] = df["name"].apply(format_name)
-    print(df["name"].unique())
 
     # Determine the degree level
     df["degree_level"] = df["degree"].apply(categorize_degree)
@@ -228,14 +229,23 @@ def save_to_db(df: pd.DataFrame, database_file: str) -> pd.DataFrame:
     # Iterate over each row in the DataFrame
     for _, row in df.iterrows():
         # Check for existing educator
-        cursor.execute("SELECT educator_id FROM wu_educators WHERE name = ?", (row.get("name"),))
+        cursor.execute(
+            """SELECT educator_id FROM educators 
+            WHERE firstName = ? AND lastName = ? AND COALESCE(middleName, '') = COALESCE(?, '')
+            """, 
+            (
+                row.get("firstName"),
+                row.get("lastName"),
+                row.get("middleName") if row.get("middleName") else None
+            )
+        )
         educator = cursor.fetchone()
 
         if educator:
             educator_id = educator[0]
         else:
             # Insert educator and get educator_id
-            educator_id = insert_educator(conn, row.get("name"))
+            educator_id = insert_educator(conn, row.get("firstName"), row.get("lastName"), row.get("middleName"))
 
         # Check for existing transcript
         file_name = row.get("file_name")
@@ -245,7 +255,7 @@ def save_to_db(df: pd.DataFrame, database_file: str) -> pd.DataFrame:
             cursor.execute(
                 """
                 SELECT transcript_id FROM transcripts WHERE 
-                wu_educator_id = ? AND institution_name = ? AND file_name = ?
+                educator_id = ? AND institution_name = ? AND file_name = ?
                 """,
                 (educator_id, row.get("institution_name"), row.get("file_name"))
             )
@@ -259,14 +269,14 @@ def save_to_db(df: pd.DataFrame, database_file: str) -> pd.DataFrame:
                     conn,
                     educator_id,
                     row.get("institution_name"),
+                    row.get("degree_level"),
+                    file_name,
                     row.get("degree"),
                     row.get("major"),
                     row.get("minor"),
                     row.get("awarded_date"),
                     row.get("overall_credits_earned"),
-                    row.get("overall_gpa"),
-                    row.get("degree_level"),
-                    file_name
+                    row.get("overall_gpa")
                 )
 
             # Store transcript_id in map
@@ -287,7 +297,7 @@ def save_to_db(df: pd.DataFrame, database_file: str) -> pd.DataFrame:
     conn.commit()
     conn.close()
 
-    print("Data successfully saved to the database.")
+    print("✅ Data successfully saved to the database.")
     return df  # Return the DataFrame for further use
 
 
@@ -315,31 +325,54 @@ def process_file(file_path: str, database_file: str):
     '''
     try:
         # Create tables
-        print("Creating tables...")
+        print("🔄 Creating tables in the database...")
         create_tables(database_file)
 
         # Extract data 
-        print("Extracting data from:", file_path)
-        extracted_df = extract_data(file_path)
+        print(f"📄 Extracting data from: {file_path}...")
+        extract_result = extract_data(file_path)
+        # If extraction fails, return the error message
+        if extract_result["status"] == "error":
+            return extract_result  # Pass error response directly to `upload_files()`
+        
+        extracted_df = extract_result["data"]
         if extracted_df is None or extracted_df.empty:
-            raise ValueError("Extracted data is empty. Please check the input file.")
-
+            return {
+                "status": "error",
+                "message": "Extracted data is empty. Please check the input file.",
+                "details": "Possible reasons: File contains no readable text or OCR failed.",
+                "file": file_path
+            }
+        
         # Structure the data
-        print("Structuring extracted data...")
+        print("🔍 Structuring extracted data...")
         structured_df = structure_data(extracted_df)
         if structured_df is None or structured_df.empty:
-            raise ValueError("Structured data is empty after processing.")
-
+            return {
+                "status": "error",
+                "message": "Structured data is empty after processing.",
+                "details": "Possible reasons: Data extraction issues or AI processing failure.",
+                "file": file_path
+            }
+        
         # Save the data to the database
-        print("Saving structured data to the database...")
+        print("💾 Saving structured data to the database...")
         save_to_db(structured_df, database_file)
 
-        print("File processed successfully!")
-        return {"status": "success", "message": "File processed and saved to the database successfully."}
+        print("✅ File processed successfully!")
+        return {
+            "status": "success", 
+            "message": "File processed and saved to the database successfully.", 
+            "file": file_path
+        }
 
     except Exception as e:
         error_message = f"Error processing file: {str(e)}"
         print(error_message)
         print(traceback.format_exc())  # Print full error traceback for debugging
-
-        return {"status": "error", "message": error_message, "details": traceback.format_exc()}
+        return {
+            "status": "error",
+            "message": error_message,
+            "details": traceback.format_exc(),
+            "file": file_path
+        }

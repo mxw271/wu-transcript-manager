@@ -41,6 +41,8 @@ AZURE_CV_ENDPOINT=your-azure-computer-vision-endpoint
 - **OpenAI API Key**: Required for transcript processing.
 - Azure Computer Vision API Key & Endpoint: Optional for transcript processing.
 
+If you update your API keys after starting the servers, run the shutdown script and rerun the start script.
+
 ### 🛠️ **Initial Setup (Run Once)**:  
 Run **this step only once** to install dependencies.
 
@@ -61,7 +63,7 @@ bash setup.sh
 - Set up a **Python virtual environment** and install required backend dependencies.
 - Install **Node.js dependencies** for the frontend.
 - Install **OCR dependencies**.
-- **Will not start the servers** (you must run `start.sh` separately)
+- **Will not start the servers** (you must run the start script separately)
 
 ---
 
@@ -132,7 +134,7 @@ bash shutdown.sh
     chmod +x setup.sh start.sh shutdown.sh
     ```
     to make the scripts executable.
-- If you need to **reinstall dependencies**, delete the `venv/` directory and `node_modules/`, then rerun `setup.sh` or `setup.bat`.
+- If you need to **reinstall dependencies**, delete the `venv/` directory and `node_modules/`, then rerun the setup script.
 
 ---
 
