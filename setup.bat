@@ -5,7 +5,8 @@ SETLOCAL ENABLEDELAYEDEXPANSION
 echo Setting Up WU Transcript Manager...
 
 :: --- Script Directory Setup --- 
-cd /d "%~dp0"
+set "SCRIPT_DIR=%~dp0"
+cd /d %SCRIPT_DIR%
 echo Running in: %CD%
 
 :: --- Check if Running as Administrator ---
@@ -139,16 +140,18 @@ echo Checking for Tesseract 5.3.0+...
 set "TESS_PATH="
 set "TESS_VERSION="
 for /f "delims=" %%t in ('where tesseract 2^>nul') do (
-    if not defined TESS_PATH set "TESS_PATH=%%~sft"
+    if not defined TESS_PATH set "TESS_PATH=%%~t"
 )
 if defined TESS_PATH (
-    for /f "tokens=2" %%v in ('"%TESS_PATH%" --version 2^>nul ^| findstr /R "^tesseract [0-9]\.[0-9]\.[0-9]"') do (
-        echo Tesseract Version Output: %%v
-        set "TESS_VERSION=%%v"
-        for /f "tokens=1,2 delims=." %%a in ("%%v") do (
-            if %%a EQU 5 (
-                if %%b GEQ 5 (
-                    goto :TESS_FOUND
+    for /f "tokens=2" %%v in ('cmd /c ""%TESS_PATH%" --version 2^>nul" ^| findstr /R "^tesseract [0-9]\.[0-9]\.[0-9]"') do (
+        if not defined TESS_VERSION (
+            echo Tesseract Version Output: %%v
+            set "TESS_VERSION=%%v"
+            for /f "tokens=1,2 delims=." %%a in ("%%v") do (
+                if %%a EQU 5 (
+                    if %%b GEQ 3 (
+                        goto :TESS_FOUND
+                    )
                 )
             )
         )
@@ -187,18 +190,10 @@ if defined TESS_PATH (
 :: Set TESSDATA_PREFIX
 setx TESSDATA_PREFIX "C:\Program Files\Tesseract-OCR\tessdata"
 
-:: ---- Database Folder Setup ----
-if not exist "database" (
-    echo Database folder missing. Creating...
-    mkdir database
-) else (
-    echo Database folder exists.
-)
-
 :: --- Backend Setup ---
 echo Setting up the backend...
-if not exist "backend" mkdir backend
-cd backend
+if not exist "%SCRIPT_DIR%\backend" mkdir "%SCRIPT_DIR%\backend"
+cd "%SCRIPT_DIR%\backend"
 
 :: Create virtual environment
 if not exist venv (
@@ -219,13 +214,71 @@ if exist "requirements.txt" (
     echo No requirements.txt found. Skipping dependency installation.
 )
 
+
+:: ---- Database Setup ----
+echo Setting up database...
+
+if not exist "%SCRIPT_DIR%\database" (
+    echo Database folder missing. Creating...
+    mkdir "%SCRIPT_DIR%\database"
+) else (
+    echo Database folder exists.
+)
+
+set "DB_PATH=%SCRIPT_DIR%\database\database.db"
+set "OFFICIAL_DB=%SCRIPT_DIR%\database\official_database.db"
+set "BACKUP_PATH=%SCRIPT_DIR%\database\database_backup_%DATE:~10,4%%DATE:~4,2%%DATE:~7,2%%TIME:~0,2%%TIME:~3,2%%TIME:~6,2%.db"
+
+:: Handling different database scenarios
+if not exist "%DB_PATH%" if not exist "%OFFICIAL_DB%" (
+    echo No database found. Creating a new one...
+    python -c "from db_create_tables import initialize_database; initialize_database(r'%DB_PATH%')"
+    echo New database initialized at %DB_PATH%
+    goto :end
+) 
+
+if exist "%DB_PATH%" if not exist "%OFFICIAL_DB%" (
+    echo database.db exists. No migration needed.
+    goto :end
+) 
+
+if not exist "%DB_PATH%" if exist "%OFFICIAL_DB%" (
+    echo No database.db found, but official_database.db exists.
+    echo Migrating official_database.db and using it as database.db...
+    copy "%OFFICIAL_DB%" "%DB_PATH%"
+    call :verify_database
+    goto :end
+) 
+
+if exist "%DB_PATH%" if exist "%OFFICIAL_DB%" (
+    echo Both database.db and official_database.db exist.
+    echo Creating a backup before migration: %BACKUP_PATH%
+    copy "%DB_PATH%" "%BACKUP_PATH%"
+
+    echo Migrating official_database.db and using it as database.db...
+    copy "%OFFICIAL_DB%" "%DB_PATH%"
+    call :verify_database
+    goto :end
+)
+
+:: Subroutine to verify schema and check database content
+:verify_database
+echo Verifying database schema...
+python -c "from db_create_tables import initialize_database; initialize_database(r'%DB_PATH%')"
+
+echo Checking database content...
+python -c "from db_service import check_database_content; check_database_content(r'%DB_PATH%')"
+exit /b
+
+:end
+echo DATABASE_FILE set to: %DB_PATH%
 cd ..
 
 :: --- Frontend Setup (Pure React) ---
 echo Setting up the frontend...
 
 :: Create frontend directory if it doesn't exist
-if not exist frontend (
+if not exist "%SCRIPT_DIR%frontend" (
     echo Creating React app...
     call "%NODE_PATH%" exec npx create-react-app frontend || echo Error running npx && pause
 )
@@ -249,4 +302,4 @@ call backend\venv\Scripts\deactivate >nul 2>&1
 
 echo Setup complete! Run './start.sh' to start the servers.
 echo You may now close this window.
-pause
+cmd /k
