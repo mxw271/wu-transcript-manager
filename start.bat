@@ -2,27 +2,31 @@
 chcp 65001 >nul
 SETLOCAL ENABLEDELAYEDEXPANSION
 
-echo "🚀 Starting WU Transcript Manager..."
+echo Starting WU Transcript Manager...
 
 :: --- Script Directory Setup --- 
 cd /d "%~dp0"
 
 :: --- Activate Virtual Environment ---
-echo 🌐 Activating Python virtual environment...
+echo Activating Python virtual environment...
 call backend\venv\Scripts\activate
 
 :: --- Start Backend Server ---
-echo 🌐 Starting FastAPI backend...
-start cmd /k "cd backend && call venv\Scripts\activate && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+echo Starting FastAPI backend...
+cd backend 
+start /b uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+cd ..
 
 :: --- Start Frontend Server --- 
-echo 🌐 Starting React frontend...
-start cmd /k "cd frontend && npm start"
+echo Starting React frontend...
+cd frontend
+start /b npm start
+cd ..
 
 :: --- Completion Messages ---
-echo 🚀 Servers are running! Access the web app at: http://localhost:3000
-echo 🔄 Leave this window open.
-echo 🛑 To stop everything, run: './shutdown.sh' or press Ctrl + C to exit manually.
+echo Servers are running! Access the web app at: http://localhost:3000
+echo Leave this window open.
+echo To stop everything, run: './shutdown.bat' or press Ctrl + C to exit manually.
 
-# Keep the window open
-pause
+:: Keep the window open
+cmd /k

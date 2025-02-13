@@ -17,11 +17,17 @@ if [[ "$SHELL" == *"zsh"* ]]; then
 fi
 
 # --- Dependency Checks ---
+echo "🔍 Checking dependencies..."
+
+# Function to check if a command exists
 command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-echo "🔍 Checking dependencies..."
+# Function to compare versions
+version_ge() {
+    [ "$(printf '%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
+}
 
 # Package manager
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -68,21 +74,21 @@ else
   echo "✅ virtualenv already installed."
 fi
 
-# Node.js v18+
-if ! command_exists node || [[ $(node -v | sed 's/v//') < "18" ]]; then
-  echo "⚠️ Node.js v18+ missing or outdated. Installing..."
+# Node.js v20+
+if ! command_exists node || [[ $(node -v | sed 's/v//') < "20" ]]; then
+  echo "⚠️ Node.js v20+ missing or outdated. Installing..."
   if [[ "$OSTYPE" == "darwin"* ]]; then
     brew install node
   elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
     sudo apt install -y nodejs
   fi
 else
   echo "✅ Node.js $(node -v) detected."
 fi
 
-# Tesseract
-if ! command_exists tesseract; then
+# Tesseract 5.3+
+if ! command_exists tesseract || ! version_ge "$(tesseract --version 2>/dev/null | awk 'NR==1{print $2}')" "5.3.0"; then
   echo "⚠️ Tesseract missing. Installing..."
   if [[ "$OSTYPE" == "darwin"* ]]; then
     brew install tesseract
@@ -90,7 +96,7 @@ if ! command_exists tesseract; then
     sudo apt install -y tesseract-ocr libtesseract-dev
   fi
 else
-  echo "✅ Tesseract detected."
+  echo "✅ Tesseract $(tesseract --version 2>/dev/null | awk 'NR==1{print $2}') detected."
 fi
 
 # --- Tesseract Configuration ---

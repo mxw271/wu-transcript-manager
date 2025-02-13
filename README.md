@@ -14,10 +14,10 @@ This project is a **full-stack web application** for managing and categorizing t
 ### 🔧 **Prerequisites**
 Ensure your system meets the following requirements:
 - **Python 3.9+**
-- **Node.js (v18+)**
+- **Node.js (v20+)**
 - **npm** (comes with Node.js)
 - **virtualenv** (for Python firtual environment)
-- **Tesseract OCR** (for PDF test extraction)
+- **Tesseract OCR 5.3+** (for PDF test extraction)
 
 If missing, the setup script will attempt to install them automatically.
 
