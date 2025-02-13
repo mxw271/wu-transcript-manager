@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 from clients_service import get_openai_client
 from process_categories import load_course_categories
 from data_pipeline import process_file
-from db_service import insert_educator, insert_transcript, insert_course, query_transcripts
+from db_service import check_database_content, insert_educator, insert_transcript, insert_course, query_transcripts
 
 
 app = FastAPI()
@@ -40,7 +40,15 @@ app.add_middleware(
 # Load environment variables from .env file
 DOTENV_PATH = os.path.join(os.path.dirname(__file__), ".env")  # Ensure correct path
 load_dotenv(DOTENV_PATH)
-DATABASE_FILE = os.getenv("DATABASE_FILE") # Load Database file from .env
+
+
+# Load Database file from .env (fallback if .env is missing)
+DATABASE_FILE = os.getenv("DATABASE_FILE" "../database/database.db") 
+if not DATABASE_FILE or not os.path.exists(DATABASE_FILE):
+    raise FileNotFoundError(f"❌ Database file not found: {DATABASE_FILE}")
+
+# Verify database content
+check_database_content(DATABASE_FILE)
 
 
 UPLOAD_FOLDER = './uploads'
@@ -86,7 +94,11 @@ def format_name(first, middle, last):
 
 
 # Function to generate a summary DataFrame
-def generate_summary_df(criteria_dict: Dict, df: pd.DataFrame, categories_file: str = "course_categories.json") -> pd.DataFrame:
+def generate_summary_df(
+    criteria_dict: Dict, 
+    df: pd.DataFrame, 
+    categories_file: str = "course_categories.json"
+) -> pd.DataFrame:
     """
     Generates a summary DataFrame with unique course categories and corresponding course details.
     Args:

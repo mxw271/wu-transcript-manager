@@ -14,7 +14,6 @@ from extraction_opencv import extract_text_from_pdf_using_opencv
 from extraction_azure import extract_text_from_file_using_azure
 from formatting_openai import generate_json_data_using_openai, json_data_to_dataframe
 from text_matching import match_courses_using_sbert
-from db_create_tables import create_tables 
 from db_service import insert_educator, insert_transcript, insert_course
 
 
@@ -324,10 +323,6 @@ def process_file(file_path: str, database_file: str):
         return {"filename": os.path.basename(file_path), "status": "Invalid", "content": ""}
     '''
     try:
-        # Create tables
-        print("🔄 Creating tables in the database...")
-        create_tables(database_file)
-
         # Extract data 
         print(f"📄 Extracting data from: {file_path}...")
         extract_result = extract_data(file_path)

@@ -60,10 +60,16 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_courses_category ON courses (should_be_category);",
 ]
 
-def create_tables(database_file):
+def initialize_database(database_file):
+    if not database_file:
+        raise ValueError("❌ Database file path is missing!")
+
     connection = sqlite3.connect(database_file)
     cursor = connection.cursor()
     
+    # Ensure foreign keys are enforced
+    cursor.execute("PRAGMA foreign_keys = ON;")
+
     # Execute table creation statements
     cursor.execute(CREATE_TABLE_EDUCATORS)
     cursor.execute(CREATE_TABLE_TRANSCRIPTS)

@@ -2,7 +2,35 @@
 # Define helper functions for database operations
 ##
 
+import sqlite3
 from sqlite3 import Connection
+
+
+# Function to validate data exists
+def check_database_content(database_file):
+    conn = None
+    try:
+        conn = sqlite3.connect(database_file)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM educators")
+        educators_count = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM transcripts")
+        transcripts_count = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM courses")
+        courses_count = cursor.fetchone()[0]
+
+        print(f"Educators: {educators_count}, Transcripts: {transcripts_count}, Courses: {courses_count}")
+
+    except Exception as e:
+        print(f"❌ Database check failed: {str(e)}")
+    
+    finally:
+        if conn:
+            conn.close()
+
 
 # Function to insert an educator
 def insert_educator(

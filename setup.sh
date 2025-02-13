@@ -119,14 +119,6 @@ export TESSDATA_PREFIX="$TESSDATA_PATH"
 echo "🔍 Verifying Tesseract installation..."
 tesseract --version || { echo "❌ Tesseract verification failed"; exit 1; }
 
-# --- Database Folder Setup ---
-if [ ! -d "$SCRIPT_DIR/database" ]; then
-  echo "❌ Database folder missing. Creating..."
-  mkdir "$SCRIPT_DIR/database"
-else
-  echo "✅ Database folder exists."
-fi
-
 # --- Backend Setup ---
 echo "🛠  Setting up backend..."
 
@@ -166,6 +158,56 @@ if [ -f "requirements.txt" ]; then
 else
   echo "❌ No requirements.txt found. Skipping dependency installation."
 fi
+
+# --- Database Setup ---
+echo "🛠  Setting up database..."
+
+if [ ! -d "$SCRIPT_DIR/database" ]; then
+  echo "❌ Database folder missing. Creating..."
+  mkdir "$SCRIPT_DIR/database"
+else
+  echo "✅ Database folder exists."
+fi
+
+DB_PATH="$SCRIPT_DIR/database/database.db"
+OFFICIAL_DB="$SCRIPT_DIR/database/official_database.db"
+BACKUP_PATH="$SCRIPT_DIR/database/database_backup_$(date +%Y%m%d%H%M%S).db"
+
+# Function to verify schema and check content
+verify_database() {
+    echo "🔍 Verifying database schema..."
+    python3 -c "from db_create_tables import initialize_database; initialize_database('$DB_PATH')"
+
+    echo "🔍 Checking database content..."
+    python3 -c "from db_service import check_database_content; check_database_content('$DB_PATH')"
+}
+
+# Handling different database scenarios
+if [ ! -f "$DB_PATH" ] && [ ! -f "$OFFICIAL_DB" ]; then
+    echo "⚠️ No database found. Creating a new one..."
+    python3 -c "from db_create_tables import initialize_database; initialize_database('$DB_PATH')"
+    echo "New database initialized at $DB_PATH"
+
+elif [ -f "$DB_PATH" ] && [ ! -f "$OFFICIAL_DB" ]; then
+    echo "✅ database.db exists. No migration needed."
+
+elif [ ! -f "$DB_PATH" ] && [ -f "$OFFICIAL_DB" ]; then
+    echo "⚠️ No database.db found, but official_database.db exists."
+    echo "Migrating official_database.db and using it as database.db..."
+    cp "$OFFICIAL_DB" "$DB_PATH"
+    verify_database
+
+elif [ -f "$DB_PATH" ] && [ -f "$OFFICIAL_DB" ]; then
+    echo "⚠️ Both database.db and official_database.db exist."
+    echo "Creating a backup for database.db before migration: $BACKUP_PATH"
+    cp "$DB_PATH" "$BACKUP_PATH"
+
+    echo "Migrating official_database.db and using it as database.db..."
+    cp "$OFFICIAL_DB" "$DB_PATH"
+    verify_database
+fi
+
+echo "DATABASE_FILE set to: $DB_PATH"
 
 # --- Frontend Setup ---
 echo "🛠  Setting up frontend..."
