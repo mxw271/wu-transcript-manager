@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 from clients_service import get_openai_client
 from process_categories import load_course_categories
 from data_pipeline import process_file
-from db_service import check_database_content, insert_educator, insert_transcript, insert_course, query_transcripts
+from db_service import check_database_content, check_database_status, insert_educator, insert_transcript, insert_course, query_transcripts
 
 
 app = FastAPI()
@@ -40,15 +40,7 @@ app.add_middleware(
 # Load environment variables from .env file
 DOTENV_PATH = os.path.join(os.path.dirname(__file__), ".env")  # Ensure correct path
 load_dotenv(DOTENV_PATH)
-
-
-# Load Database file from .env (fallback if .env is missing)
-DATABASE_FILE = os.getenv("DATABASE_FILE" "../database/database.db") 
-if not DATABASE_FILE or not os.path.exists(DATABASE_FILE):
-    raise FileNotFoundError(f"❌ Database file not found: {DATABASE_FILE}")
-
-# Verify database content
-check_database_content(DATABASE_FILE)
+DATABASE_FILE = os.getenv("DATABASE_FILE", "../database/database.db") # Load Database file from .env
 
 
 UPLOAD_FOLDER = './uploads'
@@ -164,13 +156,16 @@ async def upload_files(files: List[UploadFile] = File(...)):
     Handles file uploads, validates files, and processes them.
     Returns a JSON response with success and error details for each file.
     """
+    check_database_status(DATABASE_FILE)
+    
     # Validate file amounts
     if len(files) > MAX_FILES:
         return JSONResponse(
             status_code=400,
             content={
                 "status": "error",
-                "message": f"Too many files uploaded. Maximum allowed is {MAX_FILES}."
+                "message": f"Too many files uploaded. Maximum allowed is {MAX_FILES}.",
+                "data": []
             } 
         )
 
@@ -216,7 +211,14 @@ async def upload_files(files: List[UploadFile] = File(...)):
         processed_results.append(file_result)
 
     # Return structured JSON response for all files
-    return JSONResponse(content={"processed_files": processed_results})
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "success",
+            "message": "File processing completed.",
+            "processed_files": processed_results
+        }
+    )
 
 
 @app.post("/search")
@@ -231,37 +233,70 @@ def search_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)
     """
     criteria_dict = criteria.model_dump()
     cursor = conn.cursor()
-    print(criteria_dict.get("educator_firstName"), criteria_dict.get("educator_lastName"), criteria_dict.get("course_category"), criteria_dict.get("education_level"))
 
     try:
         results = query_transcripts(conn, criteria_dict)
-        if not results:
-            return {
-                "status": "success",
-                "message": "No transcripts found for the given criteria.",
-                "data": []
-            }
+
+        # Handling errors from query_transcripts()
+        if results == "error":
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "message": "Database query failed. Please try again later.",
+                    "data": []
+                }
+            )
+        
+        # If no results are found
+        if results is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "status": "not_found",
+                    "message": "No transcripts found for the given search criteria.",
+                    "data": []
+                }
+            )
 
         # Convert to Pandas DataFrame
-        df = pd.DataFrame(results, columns=["Educator FirstName", "Educator MiddleName", "Educator LastName", "Degree", "Degree Level", "Course Name", "Course Category", "Adjusted Credits Earned"])
+        df = pd.DataFrame(results, columns=[
+            "Educator FirstName", "Educator MiddleName", "Educator LastName", 
+            "Degree", "Degree Level", "Course Name", "Course Category", "Adjusted Credits Earned"
+        ])
     
         # Generate a summary DataFrame
         summary_df = generate_summary_df(criteria_dict, df)
+
+    except Exception as e:
+        print(f"❌ Search failed: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": "An unexpected error occurred while searching transcripts.",
+                "data": []
+            }
+        )
 
     finally:
         cursor.close()
         conn.close()  # Ensure the database connection is closed
 
-    return JSONResponse(content={
-        "queried_data": summary_df.to_dict(orient="records") if results else [],
-        "educator_name": (
-            f"{df['Educator FirstName'].iloc[0]} {df['Educator LastName'].iloc[0]}"
-            if not df.empty and criteria_dict.get("educator_firstName") and criteria_dict.get("educator_lastName") 
-            else ""
-        ) if results else "",
-        "message": "Transcripts retrieved successfully." if results else "No transcripts found for the given search criteria.",
-        "notes": """Note: A course with 0 credit may fall into one of the following cases: 
-                    1. The course is not an actual academic course but is designed for administrative or tracking purposes. 
-                    2. The educator did not pass the course.
-                 """ if results else ""
-    })
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "success",
+            "queried_data": summary_df.to_dict(orient="records"),
+            "educator_name": (
+                f"{df['Educator FirstName'].iloc[0]} {df['Educator LastName'].iloc[0]}"
+                if not df.empty and criteria_dict.get("educator_firstName") and criteria_dict.get("educator_lastName") 
+                else ""
+            ),
+            "message": "Transcripts retrieved successfully.",
+            "notes": """Note: A course with 0 credit may fall into one of the following cases: 
+                        1. The course is not an actual academic course but is designed for administrative or tracking purposes. 
+                        2. The educator did not pass the course.
+                    """
+        }
+    )

@@ -38,79 +38,115 @@ const QueryPage = () => {
     
   // Handles the search request
   const handleSearch = useCallback(async () => {
+    // Validate search criteria: if both firstName and lastName are provided or both are empty, prevent search
     if (criteria.firstName.trim() !== "" ^ criteria.lastName.trim() !== "") {
-      setResults([]); // Clear previous results if both firstName and lastName are provided or both are empty
-      setNotification('');
-      setNotificationType(null);
+      setResults([]); 
+      setNotification("Please enter both first and last name or leave them blank.");
+      setNotificationType("warning");
       return;
     }
 
     try {
       const searchResults = await searchData(criteria); // Call API with criteria
       console.log(searchResults)
+      setNotification(searchResults.message)
 
-      if (!searchResults.queried_data || searchResults.queried_data.length === 0) {
-        setResults([]);
-        setNotification(searchResults.message)
-        setNotificationType('error');
-      } else {
+      // Handle different response statuses
+      if (searchResults.status === "success") {
         setResults(searchResults); // Store the response data
-        setNotification(searchResults.message);
-        setNotificationType('success');
+        setNotificationType("success");
+      } else {
+        setResults([]);
+        if (searchResults.status_code === 404 || searchResults.status === "not_found") {
+          setNotificationType("warning");
+        } else {
+          setNotificationType("error");
+        }
       }
     } catch (error) {
+      console.error("SearchAPI Error:", error)
       setResults([]);
-      setNotification('Error during search.');
-      setNotificationType('error');
+
+      if (error.response && error.response.status === 404) {
+        setNotification("No transcripts found for the given search criteria.");
+        setNotificationType("warning");
+      } else {
+        setNotification("Error during search.");
+        setNotificationType("error");
+      }
     }
   }, [criteria]);
 
   // Handles the download request
   const handleDownload = () => {
-    if (!results.queried_data || results.queried_data.length === 0) {
-      setNotification('No data available to download.');
-      setNotificationType('error');
+    // Validate if results exist
+    if (!results || !results.queried_data || results.queried_data.length === 0) {
+      setNotification("No data available to download.");
+      setNotificationType("warning");
       return;
     }
 
     let fileName;
     let csvHeaders;
 
+    // Determin filename and headers based on educator_name presence
     if (!results.educator_name) {
-      // If educator_name is empty, use totalEducators
       fileName = "Qualifications_Worksheet.csv";
       csvHeaders = `"Total Faculty Count","${totalEducators}"\n`;
     } else {
-      // If educator_name exists, format filename and headers
-      const name = results.educator_name;
-      fileName = `${name.replace(/\s+/g, '_')}_Qualifications_Worksheet.csv`;
-      csvHeaders = `"Faculty's Name","${results.educator_name}"\n`;
+      const name = results.educator_name.trim();
+      if (!name) {
+        setNotification("Educator name is empty or invalid. Using default filename.");
+        setNotificationType("warning");
+        fileName = "Unnamed_Educator_Qualifications_Worksheet.csv";
+      } else {
+        fileName = `${name.replace(/\s+/g, '_')}_Qualifications_Worksheet.csv`;
+      }
+      csvHeaders = `"Faculty's Name","${name || "Unknown"}"\n`;
     }
 
     // Convert search results to CSV
-    const csvRows = results.queried_data
-      .map(row => Object.values(row).map((value) => `"${value}"`).join(",")) // Ensure CSV-safe formatting
-      .join("\n");
+    let csvRows = [];
+    results.queried_data.forEach(row => {
+      if (!row || typeof row !== "object") {
+        setNotification("Some data entries are invalid and were skipped.");
+        setNotificationType("warning");
+        return; // Skip invalid rows without stopping execution
+      }
+      csvRows.push(Object.values(row).map(value => `"${value}"`).join(","));
+    });
 
-    const csvContent = csvHeaders + csvRows;
+    const csvContent = csvHeaders + csvRows.join("\n");
 
-    // Create a Blob and download the CSV
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
+    if (!csvContent.trim()) {
+      setNotification("CSV content is empty. No valid data to download.");
+      setNotificationType("warning");
+      return;
+    }
 
-    // Create and trigger a download link
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', fileName);
-    document.body.appendChild(link);
-    link.click();
+    try {
+      // Create a Blob and download the CSV
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
 
-    // Clean up by removing the link
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url); // Free up memory
+      // Create and trigger a download link
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute("download", fileName);
+      document.body.appendChild(link);
+      link.click();
 
-    setNotification('CSV downloaded successfully.');
-    setNotificationType('success');
+      // Clean up by removing the link
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url); // Free up memory
+
+      setNotification("CSV downloaded successfully.");
+      setNotificationType("success");
+    } catch (error) {
+      console.error("CSV Download Error:", error);
+      setNotification(`Error generating CSV: $error.message`);
+      setNotificationType("error");
+    }
   };
 
   return (

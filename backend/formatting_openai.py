@@ -33,6 +33,7 @@ def generate_json_data_using_openai(text, openai_client):
     - The dictionary keys must match the column names specified.
     - The dictionary values must be lists of strings or numbers.
     - If student name is missing, look for "record of" field instead.
+    - If a student name as a prefix, put it with the first name.
     - If degree awarded date is missing, look for program graduation date instead.
     - Format awarded_date as "yyyy-mm-dd". If only the year is provided, format it as "yyyy-12-31".
     - Course names, course codes, credits earned, and grade are in the same line, but may be in different orders.
@@ -42,7 +43,7 @@ def generate_json_data_using_openai(text, openai_client):
     - Find letter grade first. If grade is a numeric number, turn it into a string.
     - The number of items in course_name, credits_earned, and grade lists should match.
     - Credits are in numerical format (e.g., 3.0, 4.5). GPA is in numerical format (e.g., 3.33). Ensure numerical values are properly formatted.
-    - Capitalize only important words. Keep minor words (e.g., of, in, the, and) in lowercase, unless they start a sentence.
+    - Capitalize only important words. Keep minor words (e.g., of, in, the, and) in lowercase, unless they start a sentence. Apply to student name, institution name, degree, major, minor, and course name.
     - If a field is not found, leave it as an empty list.
     **Input Data:**
     ```

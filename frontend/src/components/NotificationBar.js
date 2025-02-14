@@ -4,7 +4,9 @@ import '../styles/NotificationBar.css';
 
 const NotificationBar = ({ message, type = 'success' }) => {
   return message ? (
-    <div className={`notification-bar ${type === 'error' ? 'error' : 'success'}`}>
+    <div className={`notification-bar ${
+      type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'success'
+    }`}>
       {message}
     </div>
   ) : null;
@@ -12,7 +14,7 @@ const NotificationBar = ({ message, type = 'success' }) => {
 
 NotificationBar.propTypes = {
   message: PropTypes.string.isRequired,
-  type: PropTypes.oneOf(['error', 'success']),
+  type: PropTypes.oneOf(['error', 'warning', 'success']),
 };
 
 export default NotificationBar;

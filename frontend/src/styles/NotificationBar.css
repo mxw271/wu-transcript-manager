@@ -16,6 +16,11 @@
   background-color: red;
 }
 
+/* Warning message styling */
+.notification-bar.warning {
+  background-color: #FFBF00;
+}
+
 /* Success message styling */
 .notification-bar.success {
   background-color: green;

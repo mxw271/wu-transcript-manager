@@ -150,7 +150,12 @@ def extract_data(file_path: str) -> pd.DataFrame:
         formatted_df.to_csv(formatted_table_path, index=False, encoding="utf-8")
         print(f"✅ Formatted transcript saved to: {formatted_table_path}")
        
-        return {"status": "success", "message": "Data extracted successfully.", "data": formatted_df}
+        return {
+            "status": "success", 
+            "message": "Data extracted successfully.", 
+            "file": file_path, 
+            "data": formatted_df
+        }
     
     except Exception as e:
         error_message = f"Error extracting data from file: {str(e)}"
@@ -181,34 +186,45 @@ def structure_data(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: Processed DataFrame with additional calculated fields.    
     """
-    # Load course categories
-    categories_list = load_course_categories(openai_client = get_openai_client())
+    try:
+        # Load course categories
+        categories_list = load_course_categories(openai_client = get_openai_client())
 
-    # Perform SBERT-based matching after abbreviation expansion
-    print("Expanding abbreviations and matching courses...")
-    df["course_name_lowercase"] = df["course_name"].astype(str).str.lower()
-    df["should_be_category"] = match_courses_using_sbert(df["course_name_lowercase"].tolist(), categories_list)  
+        # Perform SBERT-based matching after abbreviation expansion
+        print("Expanding abbreviations and matching courses...")
+        df["course_name_lowercase"] = df["course_name"].astype(str).str.lower()
+        df["should_be_category"] = match_courses_using_sbert(df["course_name_lowercase"].tolist(), categories_list)  
 
-    # Determine the degree level
-    df["degree_level"] = df["degree"].apply(categorize_degree)
+        # Determine the degree level
+        df["degree_level"] = df["degree"].apply(categorize_degree)
 
-    # Calculate adjusted credits
-    df["adjusted_credits_earned"] = df.apply(
-        lambda row: calculate_adjusted_credits(
-            row["grade"], row["credits_earned"], row["degree_level"]
-        ),
-        axis=1
-    )
+        # Calculate adjusted credits
+        df["adjusted_credits_earned"] = df.apply(
+            lambda row: calculate_adjusted_credits(
+                row["grade"], row["credits_earned"], row["degree_level"]
+            ),
+            axis=1
+        )
 
-    print(df.iloc[:, 9:])
-    # Drop temporary columns
-    df.drop(columns=["course_name_lowercase"], inplace=True)
+        # Drop temporary columns
+        df.drop(columns=["course_name_lowercase"], inplace=True)
 
-    # Save the structured data to a new CSV file    
-    structured_data_path = os.path.join(OUTPUT_FOLDER, "structured_data.csv")
-    df.to_csv(structured_data_path, index=False, encoding="utf-8")
+        # Save the structured data to a new CSV file    
+        structured_data_path = os.path.join(OUTPUT_FOLDER, "structured_data.csv")
+        df.to_csv(structured_data_path, index=False, encoding="utf-8")
 
-    return df
+        return {
+            "status": "success",
+            "message": "Data structured successfully.",
+            "data": df
+        }
+    
+    except Exception as e:
+        return {
+                "status": "error",
+                "message": "Error structuring extracted data.",
+                "details": traceback.format_exc()
+            }
 
 
 # Step 4: Save structured data to SQLite
@@ -220,84 +236,96 @@ def save_to_db(df: pd.DataFrame, database_file: str) -> pd.DataFrame:
     Returns:
         pd.DataFrame: The DataFrame.
     """
-    conn = sqlite3.connect(database_file)
-    cursor = conn.cursor()
+    try:
+        conn = sqlite3.connect(database_file)
+        cursor = conn.cursor()
 
-    transcript_map = {}  # Stores mapping of file_name -> transcript_id
+        transcript_map = {}  # Stores mapping of file_name -> transcript_id
 
-    # Iterate over each row in the DataFrame
-    for _, row in df.iterrows():
-        # Check for existing educator
-        cursor.execute(
-            """SELECT educator_id FROM educators 
-            WHERE firstName = ? AND lastName = ? AND COALESCE(middleName, '') = COALESCE(?, '')
-            """, 
-            (
-                row.get("firstName"),
-                row.get("lastName"),
-                row.get("middleName") if row.get("middleName") else None
-            )
-        )
-        educator = cursor.fetchone()
-
-        if educator:
-            educator_id = educator[0]
-        else:
-            # Insert educator and get educator_id
-            educator_id = insert_educator(conn, row.get("firstName"), row.get("lastName"), row.get("middleName"))
-
-        # Check for existing transcript
-        file_name = row.get("file_name")
-        if file_name in transcript_map:
-            transcript_id = transcript_map[file_name]  # Use cached transcript_id
-        else:
+        # Iterate over each row in the DataFrame
+        for _, row in df.iterrows():
+            # Check for existing educator
             cursor.execute(
-                """
-                SELECT transcript_id FROM transcripts WHERE 
-                educator_id = ? AND institution_name = ? AND file_name = ?
-                """,
-                (educator_id, row.get("institution_name"), row.get("file_name"))
-            )
-            transcript = cursor.fetchone()
-
-            if transcript:
-                transcript_id = transcript[0]
-            else:
-                # Insert transcript and get transcript_id
-                transcript_id = insert_transcript(
-                    conn,
-                    educator_id,
-                    row.get("institution_name"),
-                    row.get("degree_level"),
-                    file_name,
-                    row.get("degree"),
-                    row.get("major"),
-                    row.get("minor"),
-                    row.get("awarded_date"),
-                    row.get("overall_credits_earned"),
-                    row.get("overall_gpa")
+                """SELECT educator_id FROM educators 
+                WHERE firstName = ? AND lastName = ? AND COALESCE(middleName, '') = COALESCE(?, '')
+                """, 
+                (
+                    row.get("firstName"),
+                    row.get("lastName"),
+                    row.get("middleName") if row.get("middleName") else None
                 )
+            )
+            educator = cursor.fetchone()
 
-            # Store transcript_id in map
-            transcript_map[file_name] = transcript_id  
+            if educator:
+                educator_id = educator[0]
+            else:
+                # Insert educator and get educator_id
+                educator_id = insert_educator(conn, row.get("firstName"), row.get("lastName"), row.get("middleName"))
 
-        # Insert course
-        course_id = insert_course(
-            conn,
-            transcript_id,
-            row.get("course_name"),
-            row.get("should_be_category"),
-            row.get("adjusted_credits_earned"),
-            row.get("credits_earned"),
-            row.get("grade"),
-        )
-    
-    # Commit changes and close connection
-    conn.commit()
-    conn.close()
+            # Check for existing transcript
+            file_name = row.get("file_name")
+            if file_name in transcript_map:
+                transcript_id = transcript_map[file_name]  # Use cached transcript_id
+            else:
+                cursor.execute(
+                    """
+                    SELECT transcript_id FROM transcripts WHERE 
+                    educator_id = ? AND institution_name = ? AND file_name = ?
+                    """,
+                    (educator_id, row.get("institution_name"), row.get("file_name"))
+                )
+                transcript = cursor.fetchone()
 
-    print("✅ Data successfully saved to the database.")
-    return df  # Return the DataFrame for further use
+                if transcript:
+                    transcript_id = transcript[0]
+                else:
+                    # Insert transcript and get transcript_id
+                    transcript_id = insert_transcript(
+                        conn,
+                        educator_id,
+                        row.get("institution_name"),
+                        row.get("degree_level"),
+                        file_name,
+                        row.get("degree"),
+                        row.get("major"),
+                        row.get("minor"),
+                        row.get("awarded_date"),
+                        row.get("overall_credits_earned"),
+                        row.get("overall_gpa")
+                    )
+
+                # Store transcript_id in map
+                transcript_map[file_name] = transcript_id  
+
+            # Insert course
+            course_id = insert_course(
+                conn,
+                transcript_id,
+                row.get("course_name"),
+                row.get("should_be_category"),
+                row.get("adjusted_credits_earned"),
+                row.get("credits_earned"),
+                row.get("grade"),
+            )
+        
+        # Commit changes and close connection
+        conn.commit()
+        conn.close()
+
+        print("✅ Data successfully saved to the database.")
+        return {
+            "status": "success",
+            "message": "Data saved to database successfully.",
+            "data": df  # Return the DataFrame for further use
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": "Error saving data to database.",
+            "details": traceback.format_exc()
+        }
 
 
 # Full data pipeline
@@ -326,7 +354,6 @@ def process_file(file_path: str, database_file: str):
         # Extract data 
         print(f"📄 Extracting data from: {file_path}...")
         extract_result = extract_data(file_path)
-        # If extraction fails, return the error message
         if extract_result["status"] == "error":
             return extract_result  # Pass error response directly to `upload_files()`
         
@@ -341,7 +368,8 @@ def process_file(file_path: str, database_file: str):
         
         # Structure the data
         print("🔍 Structuring extracted data...")
-        structured_df = structure_data(extracted_df)
+        structured_result = structure_data(extracted_df)
+        structured_df = structured_result["data"]
         if structured_df is None or structured_df.empty:
             return {
                 "status": "error",
@@ -352,7 +380,15 @@ def process_file(file_path: str, database_file: str):
         
         # Save the data to the database
         print("💾 Saving structured data to the database...")
-        save_to_db(structured_df, database_file)
+        saved_result = save_to_db(structured_df, database_file)
+        saved_df = saved_result["data"]
+        if saved_df is None or saved_df.empty:
+            return {
+                "status": "error",
+                "message": "Error saving data to database.",
+                "details": "Possible reasons: Database connection failure or data stracture issues.",
+                "file": file_path
+            }
 
         print("✅ File processed successfully!")
         return {
@@ -362,7 +398,7 @@ def process_file(file_path: str, database_file: str):
         }
 
     except Exception as e:
-        error_message = f"Error processing file: {str(e)}"
+        error_message = f"Unexpected error processing file: {str(e)}"
         print(error_message)
         print(traceback.format_exc())  # Print full error traceback for debugging
         return {

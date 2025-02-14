@@ -2,12 +2,14 @@
 # Define helper functions for database operations
 ##
 
+import os
 import sqlite3
 from sqlite3 import Connection
+from db_create_tables import initialize_database
 
 
 # Function to validate data exists
-def check_database_content(database_file):
+def check_database_content(database_file: str):
     conn = None
     try:
         conn = sqlite3.connect(database_file)
@@ -30,6 +32,16 @@ def check_database_content(database_file):
     finally:
         if conn:
             conn.close()
+
+
+# Function to check if database status
+def check_database_status(database_file: str):
+    if not database_file or not os.path.exists(database_file):
+        print(f"❌ Database file not found: {database_file}. Creating a new one...")
+        initialize_database(database_file)
+    
+    # Verify database content
+    check_database_content(database_file)
 
 
 # Function to insert an educator
@@ -172,14 +184,14 @@ def query_transcripts(conn: Connection, criteria: dict) -> list:
 
     # Filtering by educator's name
     if criteria.get("educator_firstName") and criteria.get("educator_lastName"):
-        query += " AND educators.firstName = ? AND educators.lastName = ?"
-        params.append(criteria["educator_firstName"])
-        params.append(criteria["educator_lastName"])
+        query += " AND LOWER(educators.firstName) = LOWER(?) AND LOWER(educators.lastName) = LOWER(?)"
+        params.append(criteria["educator_firstName"].lower())
+        params.append(criteria["educator_lastName"].lower())
     
     # Filtering by course category
     if criteria.get("course_category"):
-        query += " AND courses.should_be_category = ?"
-        params.append(criteria["course_category"])
+        query += " AND LOWER(courses.should_be_category) = LOWER(?)"
+        params.append(criteria["course_category"].lower())
 
     # Filtering by education level
     if criteria.get("education_level") and isinstance(criteria["education_level"], list):
@@ -187,8 +199,12 @@ def query_transcripts(conn: Connection, criteria: dict) -> list:
         query += f" AND transcripts.degree_level IN ({placeholders})"
         params.extend(criteria["education_level"])
 
-    cursor = conn.cursor()
-    cursor.execute(query, params)
-    results = cursor.fetchall()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        results = cursor.fetchall()
 
-    return results
+        return None if not results else results
+    except Exception as e:
+        print(f"❌ Database Query Failed: {str(e)}")
+        return "error" 
