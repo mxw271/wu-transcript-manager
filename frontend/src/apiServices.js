@@ -65,8 +65,8 @@ export const searchData = async (criteria) => {
   try {
     console.log(criteria);
     const response = await axios.post(`${API_URL}/search`, {
-      educator_firstName: criteria.firstName,
-      educator_lastName: criteria.lastName,
+      educator_first_name: criteria.firstName,
+      educator_last_name: criteria.lastName,
       course_category: criteria.courseCategory,
       education_level: criteria.educationLevel,
     });

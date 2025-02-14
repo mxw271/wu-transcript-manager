@@ -2,14 +2,10 @@
 # Contain the FastAPI app
 # Define routes for uploading, searching, and downloading data
 ##
-# Install the required Python libraries:
-# pip3 install sqlite fastapi uvicorn pandas
-##
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 import sqlite3
 import os
 from dotenv import load_dotenv
@@ -18,11 +14,9 @@ import pandas as pd
 import traceback
 from typing import Dict, List, Optional
 
-from clients_service import get_openai_client
-from process_categories import load_course_categories
 from data_pipeline import process_file
-from db_service import check_database_content, check_database_status, insert_educator, insert_transcript, insert_course, query_transcripts
-
+from db_service import check_database_status, query_transcripts
+from utils import MAX_FILES, SearchCriteria, load_course_categories, is_allowed_file, format_name, generate_summary_df
 
 app = FastAPI()
 
@@ -47,101 +41,11 @@ UPLOAD_FOLDER = './uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
-ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
-MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB in bytes
-MAX_FILES = 300
-
-
-# Function to check if the file extension is allowed
-def is_allowed_file(file):
-    # Check if the file has an allowed extension
-    if not ("." in file.filename and file.filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS):
-        return False
-
-    # Check if the file size is within the limit
-    if file.size > MAX_FILE_SIZE:
-        return False
-
-    return True
-
-
-# Define search request schema
-class SearchCriteria(BaseModel):
-    educator_firstName: Optional[str] = None
-    educator_lastName: Optional[str] = None
-    course_category: Optional[str] = None
-    education_level: List[str] = []
-
-
 # Get database connection
 def get_db_connection():
     conn = sqlite3.connect(DATABASE_FILE)#, check_same_thread=False)  # Allow cross-thread access
     conn.row_factory = sqlite3.Row
     return conn
-
-
-# Function to format educator's full name
-def format_name(first, middle, last):
-    return f"{first} {middle + ' ' if pd.notna(middle) and middle.strip() else ''}{last}"
-
-
-# Function to generate a summary DataFrame
-def generate_summary_df(
-    criteria_dict: Dict, 
-    df: pd.DataFrame, 
-    categories_file: str = "course_categories.json"
-) -> pd.DataFrame:
-    """
-    Generates a summary DataFrame with unique course categories and corresponding course details.
-    Args:
-        criteria_dict (dict): Dictionary containing search criteria.
-        df (pd.DataFrame): Input DataFrame containing course data.
-        categories_file (str): Path to the JSON file containing course categories.
-    Returns:
-        pd.DataFrame: Processed summary DataFrame with categories and course details.
-    """
-    # Load categorized courses data from JSON
-    unique_categories = load_course_categories(openai_client = get_openai_client())
-    unique_categories.append("Uncategorized")
-
-    # Initialize dictionary to store course details for each category
-    category_mapping = {category: [] for category in unique_categories}
-
-    # Populate category_mapping with course details
-    for _, row in df.iterrows():
-        # Determine formatted course string based on criteria_dict["educator_firstName"] & criteria_dict["educator_lastName"]
-        """if criteria_dict.get("educator_firstName") and criteria_dict.get("educator_lastName"): 
-            formatted_course = f"{row['Course Name']} ({row['Degree']} - {row['Adjusted Credits Earned']} credits)"
-        else:  # Include educator name
-            formatted_course = f"{format_name(row['Educator FirstName'], row['Educator MiddleName'], row['Educator LastName'])}: {row['Course Name']} ({row['Degree']} - {row['Adjusted Credits Earned']} credits)"
-        """
-        formatted_course = f"{row['Course Name']} ({row['Degree']} - {row['Adjusted Credits Earned']} credits - {format_name(row['Educator FirstName'], row['Educator MiddleName'], row['Educator LastName'])})"
-        
-        # Assign course to correct category or "Uncategorized"
-        category = row["Course Category"] if row["Course Category"] in unique_categories else "Uncategorized"
-        category_mapping[category].append(formatted_course)
-
-    # Convert category_mapping to a list of tuples, ensuring every category exists
-    expanded_rows = []
-    for category in unique_categories:
-        if category_mapping[category]:  # If there are courses in this category
-            for course_detail in sorted(set(category_mapping[category])):  # Sort and remove duplicates
-                expanded_rows.append((category, course_detail))
-        else:
-            expanded_rows.append((category, "N/A"))  # If no courses found, assign "N/A"
-
-    # Convert to DataFrame and drop duplicates
-    summary_df = pd.DataFrame(expanded_rows, columns=["Category", "Course Details"]).drop_duplicates()
-
-    # Sort the DataFrame
-    summary_df_sorted = summary_df.sort_values(
-        by=["Category", "Course Details"],
-        key=lambda col: col.str.lower() if col.name in ["Category", "Course Details"] else col,
-        ascending=[True, True]
-    ).reset_index(drop=True)
-
-
-    return summary_df_sorted
 
 
 # Return a list of course categories
@@ -203,7 +107,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
 
         except Exception as e:
             error_details = traceback.format_exc()
-            print(f"Error processing {file.filename}: {e}")  # Log error in backend
+            print(f"❌ Error processing {file.filename}: {str(e)}")  # Log error in backend
             file_result["status"] = "error"
             file_result["message"] = f"Unexpected error while processing {file.filename}: {str(e)}"
             file_result["details"] = error_details
@@ -261,7 +165,7 @@ def search_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)
 
         # Convert to Pandas DataFrame
         df = pd.DataFrame(results, columns=[
-            "Educator FirstName", "Educator MiddleName", "Educator LastName", 
+            "Educator First Name", "Educator Middle Name", "Educator Last Name", 
             "Degree", "Degree Level", "Course Name", "Course Category", "Adjusted Credits Earned"
         ])
     
@@ -289,8 +193,8 @@ def search_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)
             "status": "success",
             "queried_data": summary_df.to_dict(orient="records"),
             "educator_name": (
-                f"{df['Educator FirstName'].iloc[0]} {df['Educator LastName'].iloc[0]}"
-                if not df.empty and criteria_dict.get("educator_firstName") and criteria_dict.get("educator_lastName") 
+                f"{df['Educator First Name'].iloc[0]} {df['Educator Last Name'].iloc[0]}"
+                if not df.empty and criteria_dict.get("educator_first_name") and criteria_dict.get("educator_last_name") 
                 else ""
             ),
             "message": "Transcripts retrieved successfully.",

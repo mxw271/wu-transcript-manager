@@ -3,6 +3,7 @@
 ##
 
 import os
+import pandas as pd
 import sqlite3
 from sqlite3 import Connection
 from db_create_tables import initialize_database
@@ -47,25 +48,25 @@ def check_database_status(database_file: str):
 # Function to insert an educator
 def insert_educator(
     conn: Connection, 
-    firstName: str,
-    lastName: str, 
-    middleName: str = None
+    first_name: str,
+    last_name: str, 
+    middle_name: str = None
 ) -> int:
     """
     Inserts a new educator into the educators table.
     Args:
         conn (Connection): Database connection object.
-        firstName (str): The first name of the educator.
-        lastName (str): The last name of the educator.
-        middleName (str, optional): The middle name of the educator.
+        first_name (str): The first name of the educator.
+        last_name (str): The last name of the educator.
+        middle_name (str, optional): The middle name of the educator.
     Returns:
         int: The educator_id of the inserted educator.
     """
     cursor = conn.cursor()
     cursor.execute(
-        '''INSERT INTO educators (firstName, lastName, middleName) 
+        '''INSERT INTO educators (first_name, last_name, middle_name) 
            VALUES (?, ?, ?)''', 
-        (firstName, lastName, middleName)
+        (first_name, last_name, middle_name)
     )
     conn.commit()
 
@@ -126,6 +127,7 @@ def insert_course(
     course_name: str, 
     should_be_category: str,
     adjusted_credits_earned: float,
+    row_hash: str,
     credits_earned: float = None, 
     grade: str = None,
 ) -> int:
@@ -137,21 +139,127 @@ def insert_course(
         course_name (str): Name of the course.
         should_be_category (str): Category the course belongs to.
         adjusted_credits_earned (float): Credits earned for the course if passed.
+        row_hash (str): Unique hash for deduplication.
         credits_earned (float, optional): Credits earned for the course.
         grade (str, optional): Grade earned for the course.
     Returns:
         int: The course_id of the inserted course.
     """
     cursor = conn.cursor()
+
+
+    # Check if a course with the same hash already exists
+    cursor.execute("SELECT course_id FROM courses WHERE row_hash = ?", (row_hash,))
+    existing_course = cursor.fetchone()
+    if existing_course:
+        print(f"⚠️ Duplicate course detected: {course_name}. Skipping insertion.")
+        return existing_course[0]  # Return the existing course_id
+
+    # Insert new course
     cursor.execute(
-        '''INSERT INTO courses (transcript_id, course_name, should_be_category, adjusted_credits_earned, credits_earned, grade)
-           VALUES (?, ?, ?, ?, ?, ?)''',
-        (transcript_id, course_name, should_be_category, adjusted_credits_earned, credits_earned, grade)
+        '''INSERT INTO courses (transcript_id, course_name, should_be_category, adjusted_credits_earned, row_hash, credits_earned, grade)
+           VALUES (?, ?, ?, ?, ?, ?, ?)''',
+        (transcript_id, course_name, should_be_category, adjusted_credits_earned, row_hash, credits_earned, grade)
     )
     conn.commit()
 
     # Return the last inserted ID (course_id)
     return cursor.lastrowid
+
+
+# Function to insert records from dataframe into database
+def insert_records_from_df(conn, df: pd.DataFrame, transcript_map: dict) -> dict:
+    """
+    Inserts records from a DataFrame into the database while handling duplicates.
+    Args:
+        conn (sqlite3.Connection): Active database connection.
+        df (pd.DataFrame): Structured DataFrame containing transcript data.
+        transcript_map (dict): Cached mapping of file names to transcript IDs.
+    Returns:
+        dict: A summary with counts of inserted and duplicate rows.
+    """
+    cursor = conn.cursor()
+
+    # Get existing hashes from the database
+    existing_hashes = set(row[0] for row in cursor.execute("SELECT row_hash FROM courses"))
+
+    duplicate_rows = []
+    inserted_count = 0
+    batch_size = 10  # Commit after every 10 insertions for performance
+
+    try:
+        # Iterate over rows
+        for index, row in df.iterrows():
+            row_hash = row.get("row_hash")
+
+            # Skip duplicates
+            if row_hash in existing_hashes:
+                duplicate_rows.append(index)
+                print(f"Skipping duplicate row {index}.")
+                continue
+
+            # Check if educator exists
+            cursor.execute(
+                """SELECT educator_id FROM educators 
+                WHERE first_name = ? AND last_name = ? AND COALESCE(middle_name, '') = COALESCE(?, '')""",
+                (row.get("first_name", ""), row.get("last_name", ""), row.get("middle_name", None))
+            )
+            educator = cursor.fetchone()
+
+            if educator:
+                educator_id = educator[0]
+            else:
+                # Insert educator and get educator_id
+                educator_id = insert_educator(conn, row.get("first_name", ""), row.get("last_name", ""), row.get("middle_name", None))
+            
+        
+            # Check if transcript exists
+            file_name = row.get("file_name", "")
+            if file_name in transcript_map:
+                transcript_id = transcript_map[file_name]  # Use cached transcript_id
+            else:
+                cursor.execute(
+                    """SELECT transcript_id FROM transcripts WHERE 
+                    educator_id = ? AND institution_name = ? AND file_name = ?""",
+                    (educator_id, row.get("institution_name", ""), file_name)
+                )
+                transcript = cursor.fetchone()
+
+                if transcript:
+                    transcript_id = transcript[0]
+                else:
+                    # Insert transcript and get transcript_id
+                    transcript_id = insert_transcript(
+                        conn, educator_id, row.get("institution_name", ""), row.get("degree_level", ""),
+                        file_name, row.get("degree", ""), row.get("major", ""), row.get("minor", ""),
+                        row.get("awarded_date", ""), row.get("overall_credits_earned", None), row.get("overall_gpa", None)
+                    )
+
+                # Store transcript_id in map
+                transcript_map[file_name] = transcript_id  
+         
+            # Insert course
+            course_id = insert_course(
+                conn, transcript_id, row.get("course_name", ""), row.get("should_be_category", "Uncategorized"),
+                row.get("adjusted_credits_earned", 0), row.get("row_hash", ""), 
+                row.get("credits_earned", None), row.get("grade", None)
+            )
+
+            inserted_count += 1
+            if inserted_count % batch_size == 0:
+                conn.commit()  # Commit periodically to improve performance
+        
+        conn.commit()  # Final commit for remaining transactions
+    
+    except Exception as e:
+        conn.rollback()  # Rollback changes if any error occurs
+        print(f"Error inserting records: {str(e)}")
+        print(traceback.format_exc())
+    
+    return {
+        "inserted_count": inserted_count,
+        "duplicate_rows": duplicate_rows
+    }
 
 
 # Function to query transcript data based on search criteria
@@ -166,9 +274,9 @@ def query_transcripts(conn: Connection, criteria: dict) -> list:
     """
     query = '''
         SELECT 
-            educators.firstName AS educator_firstName,
-            educators.middleName AS educator_middleName,
-            educators.lastName AS educator_lastName,
+            educators.first_name AS educator_first_name,
+            educators.middle_name AS educator_middle_name,
+            educators.last_name AS educator_last_name,
             transcripts.degree,
             transcripts.degree_level,
             courses.course_name,
@@ -183,10 +291,10 @@ def query_transcripts(conn: Connection, criteria: dict) -> list:
     params = []
 
     # Filtering by educator's name
-    if criteria.get("educator_firstName") and criteria.get("educator_lastName"):
-        query += " AND LOWER(educators.firstName) = LOWER(?) AND LOWER(educators.lastName) = LOWER(?)"
-        params.append(criteria["educator_firstName"].lower())
-        params.append(criteria["educator_lastName"].lower())
+    if criteria.get("educator_first_name") and criteria.get("educator_last_name"):
+        query += " AND LOWER(educators.first_name) = LOWER(?) AND LOWER(educators.last_name) = LOWER(?)"
+        params.append(criteria["educator_first_name"].lower())
+        params.append(criteria["educator_last_name"].lower())
     
     # Filtering by course category
     if criteria.get("course_category"):

@@ -9,9 +9,9 @@ import sqlite3
 CREATE_TABLE_EDUCATORS = '''
 CREATE TABLE IF NOT EXISTS educators (
     educator_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    firstName VARCHAR(50) NOT NULL,
-    middleName VARCHAR(50) DEFAULT NULL,
-    lastName VARCHAR(50) NOT NULL
+    first_name VARCHAR(50) NOT NULL,
+    middle_name VARCHAR(50) DEFAULT NULL,
+    last_name VARCHAR(50) NOT NULL
 );
 '''
 
@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS courses (
     grade VARCHAR(8) DEFAULT NULL,
     should_be_category VARCHAR(255) NOT NULL,
     adjusted_credits_earned FLOAT NOT NULL DEFAULT 0,
+    row_hash TEXT NOT NULL UNIQUE, 
     CONSTRAINT fk_courses_transcript_id FOREIGN KEY (transcript_id) REFERENCES transcripts (transcript_id)
 );
 '''
@@ -51,8 +52,8 @@ CREATE TABLE IF NOT EXISTS courses (
 
 # Index creation statements
 CREATE_INDEXES = [
-    "CREATE INDEX IF NOT EXISTS idx_educators_firstName ON educators (firstName);",
-    "CREATE INDEX IF NOT EXISTS idx_educators_lastName ON educators (lastName);",
+    "CREATE INDEX IF NOT EXISTS idx_educators_first_name ON educators (first_name);",
+    "CREATE INDEX IF NOT EXISTS idx_educators_last_name ON educators (last_name);",
     "CREATE INDEX IF NOT EXISTS idx_transcripts_educator_id ON transcripts (educator_id);",
     "CREATE INDEX IF NOT EXISTS idx_transcripts_degree_level ON transcripts (degree_level);",
     "CREATE INDEX IF NOT EXISTS idx_courses_transcript_id ON courses (transcript_id);",

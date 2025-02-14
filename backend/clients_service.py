@@ -38,7 +38,7 @@ def get_sbert_model():
 
 # Lazy-load Azure client
 @lru_cache()
-def get_Azure_client():
+def get_azure_client():
     """
     Lazily initializes and caches the Azure Computer Vision API client.
     """
