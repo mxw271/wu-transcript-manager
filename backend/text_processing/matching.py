@@ -15,12 +15,12 @@ TEMPERATURE = 0.3 # Lower value for more deterministic, precise, and consistent
 
 
 # Function to get the best match for a course name using OpenAI
-def match_courses_using_openai(course_names: list, categories_list: list, temperature: float = TEMPERATURE) -> list:
+def match_courses_using_openai(course_names: list, categories_dict: dict, temperature: float = TEMPERATURE) -> list:
     """
     Uses OpenAI API to call ChatGPT 4o-mini to match course names with predefined categories.
     Args:
         course_names (list): List of course names from the transcript data.
-        categories_list (list): List of predefined course categories.
+        categories_dict (dict): Dictionary of course categories with names as keys and descriptions as values.
         temperature (float): Randomness level in model's response.
     Returns:
         list: List of matched categories.
@@ -28,14 +28,22 @@ def match_courses_using_openai(course_names: list, categories_list: list, temper
     openai_client = get_openai_client()
     retry_attempts = 3
 
+    # Convert dictionary to a formatted list for better clarity in the prompt
+    categories_prompt = "\n".join([f"- **{name}**: {desc}" for name, desc in categories_dict.items()])
+
     prompt = f"""
-    Match each course name to the closest category from the provided list. 
-    If no relevant category is found, return "Uncategorized".
+    You are an expert in academic course classification. Your task is to accurately match each course name to the closest category from a predefined list.
+
+    **Instructions:**
+    - Each course name must be classified into one of the provided categories.
+    - If multiple categories are relevant, choose the **most specific** category.
+    - Return the classification as a **valid JSON list** where each course matches the respective category.
     
     **Courses:** {course_names}
     
-    **Categories:** {categories_list}
-    
+    **Categories (with Descriptions):**
+    {categories_prompt}
+
     **Output Format:** Return **ONLY** a JSON list of categories, where each index corresponds to the respective course name.
     """
 
@@ -44,10 +52,10 @@ def match_courses_using_openai(course_names: list, categories_list: list, temper
             response = openai_client.chat.completions.create(
                 model="gpt-4o-mini",  # Use GPT-4 for better accuracy
                 messages=[
-                    {"role": "system", "content": "You are an expert in categorizing academic courses based on predefined categories and returning a structured list."},
+                    {"role": "system", "content": "You are an expert in categorizing academic courses into predefined categories and returning a structured list."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=700,
+                #max_tokens=700,
                 temperature=temperature
             )
             

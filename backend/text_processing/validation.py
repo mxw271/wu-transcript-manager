@@ -7,6 +7,7 @@ import numpy as np
 import json
 from datetime import datetime
 from dateutil import parser
+import traceback
 from clients_service import get_openai_client
 from utils import get_valid_value
 
@@ -46,19 +47,48 @@ def rule_based_validation(data_dict) -> list:
     errors = []
 
     try:
-        for key, values in data_dict.items():
-            if key in PATTERNS:
-                pattern = PATTERNS[key]
-                
-                for i, value in enumerate(values):
+        # Validate student-level fields
+        if "student" in data_dict:
+            for key, value in data_dict["student"].items():
+                if key in PATTERNS:
+                    pattern = PATTERNS[key]
+
                     if value is None or value == "":
                         continue  # Skip empty values
                     
                     value_str = str(value).strip()  # Convert to string and remove spaces
                     
                     if not pattern.match(value_str):
-                        errors.append(f"❌ Field '{key}', Item {i + 1}: Invalid format - '{value_str}'")
-    
+                        errors.append(f"❌ Student Field '{key}': Invalid format - '{value_str}'")
+
+        # Validate degrees and their fields
+        for degree_index, degree in enumerate(data_dict.get("degrees", [])):
+            for key, value in degree.items():
+                if key in PATTERNS and key != "courses":  # Exclude courses (handled separately)
+                    pattern = PATTERNS[key]
+
+                    if value is None or value == "":
+                        continue  # Skip empty values
+
+                    value_str = str(value).strip()
+                    
+                    if not pattern.match(value_str):
+                        errors.append(f"❌ Degree {degree_index + 1}, Field '{key}': Invalid format - '{value_str}'")
+
+            # Validate courses inside each degree
+            for course_index, course in enumerate(degree.get("courses", [])):
+                for course_key, course_value in course.items():
+                    if course_key in PATTERNS:
+                        pattern = PATTERNS[course_key]
+
+                        if course_value is None or course_value == "":
+                            continue  # Skip empty values
+                        
+                        value_str = str(course_value).strip()
+                        
+                        if not pattern.match(value_str):
+                            errors.append(f"❌ Degree {degree_index + 1}, Course {course_index + 1}, Field '{course_key}': Invalid format - '{value_str}'")
+
     except Exception as e:
         print(f"Error in rule-based validation: {e}")
         errors.append(f"Unexpected error during rule-based validation: {str(e)}")
@@ -340,7 +370,7 @@ def validate_coursework_openai(course_name, credits_earned, grade, temperature: 
 
 
 # Function to validate each value of a dictionary using OpenAI-based validation functions
-def openai_based_validation(data_dict):
+def openai_based_validation(data_dict) -> dict:
     """
     Iterates through a dictionary and validates each value using OpenAI-based validation functions.
     Updates invalid values with corrected suggestions where applicable.
@@ -349,54 +379,88 @@ def openai_based_validation(data_dict):
     Returns:
         dict: A dictionary with validated/corrected data.
     """
-    corrected_data = {}
+    corrected_data = {"student": {}, "degrees": []}
     
     try:
         # Validate Name Fields
         corrected_names = validate_name_openai(
-            get_valid_value(data_dict.get("student_firstName")),
-            get_valid_value(data_dict.get("student_middleName")),
-            get_valid_value(data_dict.get("student_lastName"))
-        ) or {}
+            get_valid_value(data_dict.get("student", {}).get("first_name")),
+            get_valid_value(data_dict.get("student", {}).get("middle_name")),
+            get_valid_value(data_dict.get("student", {}).get("last_name"))
+        )
 
-        # Validate Academic Information (Institution, Degree, Major, Minor)
-        corrected_academic_info = validate_academic_info_openai(
-            get_valid_value(data_dict.get("institution_name")),
-            get_valid_value(data_dict.get("degree")),
-            get_valid_value(data_dict.get("major")),
-            get_valid_value(data_dict.get("minor"))
-        ) or {}
+        if corrected_names:
+            corrected_data["student"]["first_name"] = corrected_names.get("first_name", get_valid_value(data_dict["student"].get("first_name")))
+            corrected_data["student"]["middle_name"] = corrected_names.get("middle_name", get_valid_value(data_dict["student"].get("middle_name")))
+            corrected_data["student"]["last_name"] = corrected_names.get("last_name", get_valid_value(data_dict["student"].get("last_name")))
+        else:
+            corrected_data["student"] = data_dict["student"]  # Preserve original data if OpenAI fails
 
-        # Validate Awarded Date
-        corrected_awarded_date = validate_awarded_date_openai(
-            get_valid_value(data_dict.get("awarded_date"))
-        ) or {}
+        # Validate and correct degrees
+        for degree in data_dict.get("degrees", []):
+            corrected_degree = {}
 
-        # Validate Overall Credits Earned & Overall GPA
-        corrected_performance = validate_academic_performance_openai(
-            get_valid_value(data_dict.get("overall_credits_earned"), None),
-            get_valid_value(data_dict.get("overall_gpa"), None)
-        ) or {}
+            # Validate Academic Information (Institution, Degree, Major, Minor)
+            corrected_academic_info = validate_academic_info_openai(
+                get_valid_value(degree.get("institution_name")),
+                get_valid_value(degree.get("degree")),
+                get_valid_value(degree.get("major")),
+                get_valid_value(degree.get("minor"))
+            ) 
 
-        # Validate Coursework (Course Name, Credits Earned, Grade)
-        corrected_coursework = [
-            validate_coursework_openai(course, credits, grade) or 
-            {"course_name": course, "credits_earned": credits, "grade": grade}
-            for course, credits, grade in zip(
-                data_dict.get("course_name", []),
-                data_dict.get("credits_earned", []),
-                data_dict.get("grade", [])
-            )
-        ]
+            if corrected_academic_info:
+                corrected_degree["institution_name"] = corrected_academic_info.get("institution_name", get_valid_value(degree.get("institution_name")))
+                corrected_degree["degree"] = corrected_academic_info.get("degree", get_valid_value(degree.get("degree")))
+                corrected_degree["major"] = corrected_academic_info.get("major", get_valid_value(degree.get("major")))
+                corrected_degree["minor"] = corrected_academic_info.get("minor", get_valid_value(degree.get("minor")))
+            else:
+                corrected_degree["institution_name"] = degree.get("institution_name")
+                corrected_degree["degree"] = degree.get("degree")
+                corrected_degree["major"] = degree.get("major")
+                corrected_degree["minor"] = degree.get("minor")
 
+            # Validate Awarded Date
+            corrected_awarded_date = validate_awarded_date_openai(get_valid_value(degree.get("awarded_date"))) 
+            corrected_degree["awarded_date"] = corrected_awarded_date.get("awarded_date", get_valid_value(degree.get("awarded_date")))
+
+            # Validate Overall Credits Earned & Overall GPA
+            corrected_performance = validate_academic_performance_openai(
+                get_valid_value(degree.get("overall_credits_earned"), None),
+                get_valid_value(degree.get("overall_gpa"), None)
+            ) 
+
+            corrected_degree["overall_credits_earned"] = corrected_performance.get("overall_credits_earned", get_valid_value(degree.get("overall_credits_earned"), None))
+            corrected_degree["overall_gpa"] = corrected_performance.get("overall_gpa", get_valid_value(degree.get("overall_gpa"), None))
+
+            # Validate Coursework (Course Name, Credits Earned, Grade)
+            corrected_courses = []
+
+            for course in degree.get("courses", []):
+                corrected_course = validate_coursework_openai(
+                    course.get("course_name", ""),
+                    course.get("credits_earned", ""),
+                    course.get("grade", "")
+                ) or {}
+
+                corrected_courses.append({
+                    "course_name": corrected_course.get("course_name", course.get("course_name", "")),
+                    "credits_earned": corrected_course.get("credits_earned", course.get("credits_earned")),
+                    "grade": corrected_course.get("grade", course.get("grade", "")),
+                    "is_passed": course.get("is_passed", False)
+                })
+
+            corrected_degree["courses"] = corrected_courses
+            corrected_data["degrees"].append(corrected_degree)
+
+        # Preserve file_name if it exists
+        corrected_data["file_name"] = get_valid_value(data_dict.get("file_name", ""))
+
+        '''
         # Corrected Data Assignment
-        corrected_data["first_name"] = [corrected_names.get("first_name", get_valid_value(data_dict.get("student_firstName")))]
         corrected_data["middle_name"] = (
             [] if not data_dict.get("middle_name") else 
             [corrected_names.get("middle_name", get_valid_value(data_dict.get("student_middleName")))]
         )
-        corrected_data["last_name"] = [corrected_names.get("last_name", get_valid_value(data_dict.get("student_lastName")))]
-        corrected_data["institution_name"] = [corrected_academic_info.get("institution_name", get_valid_value(data_dict.get("institution_name")))]
         corrected_data["degree"] = (
             [] if not data_dict.get("degree") else 
             [corrected_academic_info.get("degree", get_valid_value(data_dict.get("degree")))]
@@ -421,16 +485,7 @@ def openai_based_validation(data_dict):
             [] if not data_dict.get("overall_gpa") else 
             [corrected_performance.get("overall_gpa", get_valid_value(data_dict.get("overall_gpa"), None))]
         )
-
-        # Processing corrected coursework
-        corrected_data["course_name"] = [entry.get("course_name", "") for entry in corrected_coursework]
-        corrected_data["credits_earned"] = [entry.get("credits_earned", "") for entry in corrected_coursework]
-        corrected_data["grade"] = [entry.get("grade", "") for entry in corrected_coursework]
-
-        # Handle Boolean `is_passed`
-        corrected_data["is_passed"] = data_dict.get("is_passed", [])
-        corrected_data["file_name"] = data_dict.get("file_name", [])
-
+        '''
         return corrected_data
 
     except Exception as e:

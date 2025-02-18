@@ -4,6 +4,7 @@ import sqlite3
 import os
 import csv
 import json
+from pathlib import Path
 from typing import Dict, Any, List
 import time
 import traceback
@@ -43,12 +44,12 @@ def extract_data(file_path: str) -> dict:
             }
 
         # Save the text to a .csv file
-        extracted_text_path = os.path.join(OUTPUT_FOLDER, "extracted_text_opencv.csv")
+        extracted_text_path = os.path.join(OUTPUT_FOLDER, f"{Path(file_path).stem}_extracted_text_opencv.csv")
         with open(extracted_text_path, "w", newline="", encoding="utf-8") as csv_file:
             csv_writer = csv.writer(csv_file)
             csv_writer.writerow(["Line"])  # Add a header
             csv_writer.writerows([[line] for line in extracted_text.splitlines()])
-        print(f"✅ Extracted text saved to: {extracted_text_path}")
+        print(f"Extracted text saved to: {extracted_text_path}")
 
         # Process the text using OpenAI API
         print("Sending extracted text to OpenAI API for processing...")
@@ -62,15 +63,15 @@ def extract_data(file_path: str) -> dict:
             }
 
         # Add the file name to the DataFrame
-        data_dict["file_name"] = [os.path.basename(file_path)]
+        data_dict["file_name"] = os.path.basename(file_path)
 
-        print("OpenAI API response received:", json.dumps(data_dict, indent=4))
+        #print("Extracted data:", json.dumps(data_dict, indent=4))
 
         # Save the JSON obejct to a file
-        json_path = os.path.join(OUTPUT_FOLDER, "extracted_data_dict.json")
+        json_path = os.path.join(OUTPUT_FOLDER, f"{Path(file_path).stem}_extracted_data_dict.json")
         with open(json_path, "w") as json_file:
             json.dump(data_dict, json_file, indent=4)
-        print(f"✅ JSON object saved to: {json_path}")
+        print(f"JSON object saved to: {json_path}")
 
         '''
         # Format the data to a DataFrame
@@ -90,7 +91,7 @@ def extract_data(file_path: str) -> dict:
         # Save the formatted data to a new CSV file
         formatted_table_path = os.path.join(OUTPUT_FOLDER, "formatted_table_openai.csv")
         formatted_df.to_csv(formatted_table_path, index=False, encoding="utf-8")
-        print(f"✅ Formatted transcript saved to: {formatted_table_path}")
+        print(f"Formatted transcript saved to: {formatted_table_path}")
         '''
 
         return {
@@ -148,13 +149,13 @@ def validate_data(data_dict: dict) -> dict:
                 "details": "Check for issues in OpenAI validation output."
             }
 
-        print("Validated:", json.dumps(corrected_dict, indent=4))
+       # print("Validated data:", json.dumps(corrected_dict, indent=4))
 
         # Save the JSON obejct to a file
-        json_path = os.path.join(OUTPUT_FOLDER, "validated_data_dict.json")
+        json_path = os.path.join(OUTPUT_FOLDER, f"{os.path.splitext(corrected_dict["file_name"])[0]}_validated_data_dict.json")
         with open(json_path, "w") as json_file:
             json.dump(corrected_dict, json_file, indent=4)
-        print(f"✅ JSON object saved to: {json_path}")
+        print(f"JSON object saved to: {json_path}")
 
         return {
             "status": "success",
@@ -187,52 +188,66 @@ def structure_data(data_dict: dict) -> dict:
     warnings = []
 
     # Load course categories
-    categories_list = load_course_categories()
+    categories_dict = load_course_categories()
 
-    # Perform text matching
-    print("Matching courses using OpenAI...")
-    categorized_courses = match_courses_using_openai(data_dict["course_name"], categories_list)
+    # Iterate through each degree and process its courses
+    for degree in data_dict.get("degrees", []):
+        course_names = [course["course_name"] for course in degree["courses"]]
 
-    if not categorized_courses or all(category == "Uncategorized" for category in categorized_courses):
-        warnings.append("OpenAI classification failed.")
-        print("OpenAI classification failed or returned all 'Uncategorized'. Falling back to SBERT...")
-        categorized_courses = match_courses_using_sbert(data_dict["course_name"], categories_list)
+        # Perform text matching using OpenAI
+        print("Matching courses using OpenAI...")
+        categorized_courses = match_courses_using_openai(course_names, categories_dict)
 
-    if not categorized_courses or all(category == "Uncategorized" for category in categorized_courses):
-        warnings.append("SBERT classification also failed. Defaulting all categories to 'Uncategorized'.")
-        print("SBERT classification also failed, defaulting all categories to 'Uncategorized'.")
+        # If OpenAI fails, fallback to SBERT
+        if not categorized_courses or all(category == "Uncategorized" for category in categorized_courses):
+            warnings.append(f"OpenAI classification failed for degree: {degree.get('degree', '')}.")
+            print("OpenAI classification failed or returned all 'Uncategorized'. Falling back to SBERT...")
+            categories_list = list(categories_dict.keys())
+            categorized_courses = match_courses_using_sbert(course_names, categories_list)
 
-    data_dict["should_be_category"] = categorized_courses if categorized_courses else ["Uncategorized"] * len(data_dict["coiurse_name"])
+        # If SBERT also fails, default to Uncategorized
+        if not categorized_courses or all(category == "Uncategorized" for category in categorized_courses):
+            warnings.append(f"SBERT classification also failed for degree: {degree.get('degree', '')}. Defaulting to 'Uncategorized'.")
+            print("SBERT classification also failed, defaulting all categories to 'Uncategorized'.")
 
-    # Determine the degree level
-    data_dict["degree_level"] = [categorize_degree(data_dict.get("degree", [""])[0])]
+        # Assign categories to courses
+        for i, course in enumerate(degree["courses"]):
+            course["should_be_category"] = categorized_courses[i] if categorized_courses else "Uncategorized"
 
-    # Calculate adjusted credits
-    data_dict["adjusted_credits_earned"] = [
-        credits if is_passed else 0  # If is_passed is True, keep credits; otherwise, set to 0
-        for credits, is_passed in zip(data_dict["credits_earned"], data_dict["is_passed"])
-    ]
+        # Assign degree level
+        degree["degree_level"] = categorize_degree(degree.get("degree", ""))
 
-    # Generate row hash
-    data_dict["row_hash"] = [
-        generate_row_hash(
-            get_valid_value(data_dict.get("first_name")), get_valid_value(data_dict.get("last_name")), 
-            get_valid_value(data_dict.get("institution_name")), get_valid_value(data_dict.get("degree")), 
-            get_valid_value(data_dict.get("major")), get_valid_value(data_dict.get("minor")), 
-            get_valid_value(data_dict.get("awarded_date")), get_valid_value(data_dict.get("overall_credits_earned"), None), 
-            get_valid_value(data_dict.get("overall_gpa"), None),
-            data_dict.get("course_name")[i], data_dict.get("credits_earned")[i], data_dict.get("grade")[i]
-        )
-        for i in range(len(data_dict.get("course_name")))
-    ]
+        # Process courses inside the degree
+        for course in degree["courses"]:
+            # Calculate adjusted credits (if is_passed is True, keep credits; otherwise, set to 0)
+            course["adjusted_credits_earned"] = course["credits_earned"] if course["is_passed"] else 0
 
-    print("Structured:", json.dumps(data_dict, indent=4))
+            # Generate row hash for each course
+            course["row_hash"] = generate_row_hash(
+                get_valid_value(data_dict.get("student", {}).get("first_name")),
+                get_valid_value(data_dict.get("student", {}).get("last_name")),
+                get_valid_value(degree.get("institution_name")),
+                get_valid_value(degree.get("degree")),
+                get_valid_value(degree.get("major")),
+                get_valid_value(degree.get("minor")),
+                get_valid_value(degree.get("awarded_date")),
+                get_valid_value(degree.get("overall_credits_earned"), None),
+                get_valid_value(degree.get("overall_gpa"), None),
+                course.get("course_name"),
+                course.get("credits_earned"),
+                course.get("grade")
+            )
+
+    # Preserve warnings in the final data_dict if needed
+    data_dict["categorization_warnings"] = warnings if warnings else None
+
+    print("Structured data:", json.dumps(data_dict, indent=4))
 
     # Save the JSON obejct to a file
-    json_path = os.path.join(OUTPUT_FOLDER, "structured_data_dict.json")
+    json_path = os.path.join(OUTPUT_FOLDER, f"{os.path.splitext(data_dict["file_name"])[0]}_structured_data_dict.json")
     with open(json_path, "w") as json_file:
         json.dump(data_dict, json_file, indent=4)
-    print(f"✅ JSON object saved to: {json_path}")
+    print(f"JSON object saved to: {json_path}")
 
     print("Data structured successfully.")
     return {
@@ -264,7 +279,7 @@ def save_to_database(data_dict: dict, database_file: str) -> dict:
         conn.commit()
         conn.close()
 
-        print(f"✅ Data successfully saved to database: {result['inserted_count']} rows inserted, {len(result['duplicate_rows'])} duplicates skipped.")
+        print(f"Data successfully saved to database: {result['inserted_count']} rows inserted, {len(result['duplicate_rows'])} duplicates skipped.")
         return {
             "status": "success",
             "message": f"Data saved successfully: {result['inserted_count']} rows inserted, {len(result['duplicate_rows'])} duplicates skipped.",
@@ -326,7 +341,7 @@ def process_file(file_path: str, database_file: str) -> dict:
             }
 
         # Structure the data
-        print("🔍 Structuring validated data...")
+        print("🔧 Structuring validated data...")
         structured_result = structure_data(validated_dict)
         if structured_result["status"] == "error":
             return structured_result
@@ -346,7 +361,15 @@ def process_file(file_path: str, database_file: str) -> dict:
         if saved_result["status"] == "error":
             return saved_result
 
-        print("✅ File processed successfully!")
+        print("✅ File processed successfully! Deleting files...")
+
+        # Delete files after processing
+        file_prefix = Path(file_path).stem
+        output_folder = Path(OUTPUT_FOLDER)
+        for file in output_folder.iterdir():
+            if file.is_file() and file.name.startswith(file_prefix):
+                file.unlink()  # Deletes the file
+
         return {
             "status": "success", 
             "message": "File processed and saved to the database successfully.", 

@@ -39,42 +39,54 @@ def generate_data_dict_using_openai(text, temperature: float = TEMPERATURE):
     The JSON **must** follow this structure:
     ```json
     {{
-        "student_firstName": [],
-        "student_middleName": [],
-        "student_lastName": [],
-        "institution_name": [],
-        "degree": [],
-        "major": [],
-        "minor": [],
-        "awarded_date": [],
-        "overall_credits_earned": [],
-        "overall_gpa": [],
-        "course_name": [],
-        "credits_earned": [],
-        "grade": [],
-        "is_passed": []
+        "degrees": [
+            {{
+                "degree": "",
+                "major": "",
+                "minor": "",
+                "institution_name": "",
+                "awarded_date": "",
+                "overall_credits_earned": "",
+                "overall_gpa": "",
+                "courses": [
+                    {{
+                        "course_name": "",
+                        "credits_earned": "",
+                        "grade": "",
+                        "is_passed": ""
+                    }}
+                ]
+            }}
+        ],
+        "student": {{
+            "first_name": "",
+            "middle_name": "",
+            "last_name": ""
+        }}
     }}
     ```
     **Rules:**
     - Return only valid JSON, with no extra text, comments, or markdown formatting.
     - No explanations, just the JSON output.
-    - The dictionary keys must match the column names specified.
-    - The dictionary values must be lists of strings or numbers.
+    - The dictionary keys must match the exact structure specified.
+    - All degree-related fields (degree, major, minor, institution_name, awarded_date, overall_credits_earned, overall_gpa) must be grouped under degrees.
+    - Each degree must contain a list of its corresponding courses.
+    - The student name must be stored separately under the "student" key.
     - If student name is missing, look for "record of" field instead.
-    - If a student name as a prefix, put it with the first name.
-    - If degree awarded date is missing, look for program graduation date instead.
-    - Format awarded_date as "yyyy-mm-dd". If only the year is provided, format it as "yyyy-12-31".
-    - Course names, course codes, credits earned, and grade are in the same line, but may be in different orders.
-    - Course names may contain abbreviations or special characters. If present, expand abbreviations, but don't expand special characters (e.g., &).
-    - Course codes contain abbreviations and numbers. Discard course codes and extract only course names. 
-    - If credits earned is missing for a course, look for the credits attempted or the credits of that course.
-    - The grade is either a letter grade or a numeric grade. If grade is a numeric number, turn it into a string.
-    - Based on the degree and the grading system in the transcript, if a course has a passing grade, the value of "is_passed" is "True"; otherwise, it's "False".
-    - The number of items in course_name, credits_earned, and grade lists should match. If not, redo the extraction.
-    - The sum of the credits_earned should equal to overall_credits_earned. If not, redo the extraction.
-    - Credits are in numerical format (e.g., 3.0, 4.5). GPA is in numerical format (e.g., 3.33). Ensure numerical values are properly formatted.
-    - Capitalize only important words. Keep minor words (e.g., of, in, the, and) in lowercase, unless they start a sentence. Apply to student name, institution name, degree, major, minor, and course name.
-    - If a field is not found, leave it as an empty list.
+    - If a student name has a suffix (e.g., Jr., III), put it with the first name.
+    - If the degree awarded date is missing, look for the program graduation date instead.
+    - Format "awarded_date" as "yyyy-mm-dd". If only the year is provided, format it as "yyyy-12-31".
+    - Course names may contain abbreviations or special characters: expand abbreviations (e.g., "Mgmt" → "Management"); preserve special characters (e.g., "&" remains "&").
+    - Course codes contain abbreviations and numbers. Discard course codes and extract only course names.
+    - If credits earned is missing for a course, look for credits attempted or credits from the same course. Credits earned may be displayed as an abbreviation (e.g., CrE).
+    - The grade is either a letter grade (e.g., A, B+) or a numeric grade. If numeric, convert it into a string.
+    - Use the grading system from the transcript to determine "is_passed": if the grade is a passing grade for the program, "is_passed" = True; if not, "is_passed" = False.
+    - The number of items in "course_name", "credits_earned", and "grade" lists must match. If not, redo extraction.
+    - The sum of "credits_earned" for a degree must match "overall_credits_earned". If not, redo extraction.
+    - Ensure numerical values are properly formatted (e.g., 3.0, 4.5 for credits; 3.33 for GPA).
+    - Capitalize only important words. Keep minor words lowercase (e.g., "of", "in", "the") unless they start a sentence.
+    - If a field is not found, use an empty string ("") for single values and an empty list ([]) for lists.
+
     **Input Data:**
     ```
     {text}
@@ -88,7 +100,7 @@ def generate_data_dict_using_openai(text, temperature: float = TEMPERATURE):
                 {"role": "system", "content": "You are an OCR expert in extracting text from academic transcript images with high accuracy and returning structured JSON data."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1000,
+            #max_tokens=2000,
             temperature=temperature
         )
         
@@ -175,9 +187,9 @@ def preprocess_data_dict(data_dict: dict) -> dict:
     """
     # Define a mapping of column names to their corresponding formatting functions
     format_map = {
-        "student_firstName": format_title,
-        "student_middleName": format_title,
-        "student_lastName": format_title,
+        "first_name": format_title,
+        "middle_name": format_title,
+        "last_name": format_title,
         "institution_name": format_title,
         "degree": format_title,
         "major": format_title,
@@ -190,15 +202,33 @@ def preprocess_data_dict(data_dict: dict) -> dict:
         "is_passed": format_boolean
     }
 
-    formatted_data = {}
+    formatted_data = {"student": {}, "degrees": {}, "file_name": data_dict["file_name"]}
 
-    for key, value_list in data_dict.items():
-        if key in format_map:
-            # Apply the formatting function to each item in the list
-            formatted_data[key] = [format_map[key](item) for item in value_list]
-        else:
-            # If no formatting function, keep the data as is
-            formatted_data[key] = value_list
+    # Process student-level fields
+    formatted_data["student"] = {
+        key: format_map[key](value) if key in format_map else value
+        for key, value in data_dict.get("student", {}).items()
+    }
+
+    # Process degrees and their courses
+    formatted_data["degrees"] = []
+
+    for degree in data_dict.get("degrees", []):
+        formatted_degree = {
+            key: format_map[key](degree[key]) if key in format_map else degree[key]
+            for key in degree if key != "courses"  # Skip courses for now
+        }
+
+        # Process courses within each degree
+        formatted_degree["courses"] = [
+            {
+                course_key: format_map[course_key](course[course_key]) if course_key in format_map else course[course_key]
+                for course_key in course
+            }
+            for course in degree.get("courses", [])
+        ]
+
+        formatted_data["degrees"].append(formatted_degree)
 
     return formatted_data
 

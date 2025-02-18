@@ -46,11 +46,11 @@ def load_course_categories(categories_file = "./course_categories.json"):
         print(f"Warning: {categories_file} not found! Using default empty category list.")
         return []
     
-    # Load original categories from categories_file
-    with open(categories_file, "r") as file:
-        data = json.load(file)
-    course_categories = data.get("course_categories", [])
-    return course_categories
+    # Load categories from JSON file
+    with open(categories_file, "r", encoding="utf-8") as file:
+        course_categories = json.load(file)
+    
+    return course_categories # Returns a dictionary of categories with descriptions
 
 
 # Function to check if the file extension is allowed
@@ -66,11 +66,11 @@ def is_allowed_file(file):
     return True
 
 
-# Function to return the first item of a list if available, otherwise returns a default value
-def get_valid_value(value_list, default=""):
-    if isinstance(value_list, list) and value_list:
-        return value_list[0] if value_list[0] is not None else default
-    return default
+# Function to return a value if available, otherwise returns a default value
+def get_valid_value(value, default=""):
+    if value in [None, "", []]:  
+        return default  # Return empty string for text, None for numeric fields
+    return value
 
 
 # Function to categorize degree levels

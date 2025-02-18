@@ -192,18 +192,11 @@ def insert_records_from_dict(conn, data_dict: dict, transcript_map: dict) -> dic
     batch_size = 10  # Commit after every 10 insertions for performance
 
     try:
-        # Extract single-value fields
-        first_name = data_dict.get("first_name", [""])[0]
-        middle_name = data_dict.get("middle_name", [""])[0] if data_dict.get("middle_name") else None
-        last_name = data_dict.get("last_name", [""])[0]
-        institution_name = data_dict.get("institution_name", [""])[0]
-        degree = data_dict.get("degree", [""])[0] if data_dict.get("degree") else None
-        major = data_dict.get("major", [""])[0] if data_dict.get("major") else None
-        minor = data_dict.get("minor", [""])[0] if data_dict.get("minor") else None
-        awarded_date = data_dict.get("awarded_date", [""])[0] if data_dict.get("awarded_date") else None
-        overall_credits_earned = data_dict.get("overall_credits_earned", [None])[0] if data_dict.get("overall_credits_earned") else None
-        overall_gpa = data_dict.get("overall_gpa", [None])[0] if data_dict.get("overall_gpa") else None
-        degree_level = data_dict.get("degree_level", [""])[0]
+        # Extract student-level information
+        student = data_dict.get("student", {})
+        first_name = student.get("first_name", "")
+        middle_name = student.get("middle_name", None)  # Can be None
+        last_name = student.get("last_name", "")
 
         # Check if educator exists
         cursor.execute(
@@ -218,54 +211,66 @@ def insert_records_from_dict(conn, data_dict: dict, transcript_map: dict) -> dic
         else: # Insert educator and get educator_id
             educator_id = insert_educator(conn, first_name, last_name, middle_name)
 
-        # Check if transcript exists
-        file_name = data_dict.get("file_name", [""])[0]
-        if file_name in transcript_map:
-            transcript_id = transcript_map[file_name]  # Use cached transcript_id
-        else:
-            cursor.execute(
-                """SELECT transcript_id FROM transcripts WHERE 
-                educator_id = ? AND institution_name = ? AND file_name = ?""",
-                (educator_id, institution_name, file_name)
-            )
-            transcript = cursor.fetchone()
+        # Iterate over degrees
+        for degree in data_dict.get("degrees", []):
+            institution_name = degree.get("institution_name", "")
+            degree_name = degree.get("degree", None)  # Can be None
+            major = degree.get("major", None)  # Can be None
+            minor = degree.get("minor", None)  # Can be None
+            awarded_date = degree.get("awarded_date", None)  # Can be None
+            overall_credits_earned = degree.get("overall_credits_earned", None)  # Can be None
+            overall_gpa = degree.get("overall_gpa", None)  # Can be None
+            degree_level = degree.get("degree_level", "")
 
-            if transcript:
-                transcript_id = transcript[0]
-            else: # Insert transcript and get transcript_id
-                transcript_id = insert_transcript(
-                    conn, educator_id, institution_name, degree_level,
-                    file_name, degree, major, minor, awarded_date, 
-                    overall_credits_earned, overall_gpa
+            # Check if transcript exists
+            file_name = data_dict.get("file_name", "")
+            if file_name in transcript_map:
+                transcript_id = transcript_map[file_name]  # Use cached transcript_id
+            else:
+                cursor.execute(
+                    """SELECT transcript_id FROM transcripts WHERE 
+                    educator_id = ? AND institution_name = ? AND file_name = ?""",
+                    (educator_id, institution_name, file_name)
+                )
+                transcript = cursor.fetchone()
+
+                if transcript:
+                    transcript_id = transcript[0]
+                else: # Insert transcript and get transcript_id
+                    transcript_id = insert_transcript(
+                        conn, educator_id, institution_name, degree_level,
+                        file_name, degree_name, major, minor, awarded_date, 
+                        overall_credits_earned, overall_gpa
+                    )
+
+                # Store transcript_id in map
+                transcript_map[file_name] = transcript_id  
+
+            # Iterate over courses in the degree
+            for course in degree.get("courses", []):
+                row_hash = course["row_hash"]
+
+                # Skip duplicates
+                if row_hash in existing_hashes:
+                    duplicate_rows.append(row_hash)
+                    print(f"Skipping duplicate course: {course['course_name']}")
+                    continue
+
+                # Insert course record
+                course_id = insert_course(
+                    conn, transcript_id, 
+                    course["course_name"], 
+                    course["should_be_category"], 
+                    course["adjusted_credits_earned"], 
+                    course["row_hash"], 
+                    course["credits_earned"], 
+                    course["grade"],
+                    course["is_passed"]
                 )
 
-            # Store transcript_id in map
-            transcript_map[file_name] = transcript_id  
-
-        # Iterate over multi-value course records
-        for i in range(len(data_dict["course_name"])):
-            row_hash = data_dict["row_hash"][i]
-
-            # Skip duplicates
-            if row_hash in existing_hashes:
-                duplicate_rows.append(i)
-                print(f"Skipping duplicate row {i}.")
-                continue
-
-            # Insert course record
-            course_id = insert_course(
-                conn, transcript_id, data_dict["course_name"][i], 
-                data_dict["should_be_category"][i], 
-                data_dict["adjusted_credits_earned"][i], 
-                data_dict["row_hash"][i], 
-                data_dict["credits_earned"][i], 
-                data_dict["grade"][i],
-                data_dict["is_passed"][i]
-            )
-
-            inserted_count += 1
-            if inserted_count % batch_size == 0:
-                conn.commit()  # Commit periodically to improve performance
+                inserted_count += 1
+                if inserted_count % batch_size == 0:
+                    conn.commit()  # Commit periodically for performance
         
         conn.commit()  # Final commit for remaining transactions
 

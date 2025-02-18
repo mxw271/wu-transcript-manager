@@ -51,7 +51,9 @@ def get_db_connection():
 # Return a list of course categories
 @app.get("/course-categories")
 def get_course_categories():
-    return {"course_categories": load_course_categories()}
+    categories_dict = load_course_categories()
+    categories_list = list(categories_dict.keys())
+    return {"course_categories": categories_list}
 
 
 @app.post("/upload")
