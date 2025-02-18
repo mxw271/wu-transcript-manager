@@ -6,8 +6,6 @@ from pydantic import BaseModel
 import hashlib
 import traceback
 
-from clients_service import get_openai_client
-
 
 # Constants for uploading file limits
 ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
@@ -66,6 +64,13 @@ def is_allowed_file(file):
         return False
 
     return True
+
+
+# Function to return the first item of a list if available, otherwise returns a default value
+def get_valid_value(value_list, default=""):
+    if isinstance(value_list, list) and value_list:
+        return value_list[0] if value_list[0] is not None else default
+    return default
 
 
 # Function to categorize degree levels
@@ -157,6 +162,7 @@ def handle_csv_error(csv_file, log_data, message, exception):
     """Handles and logs errors during CSV processing."""
     error_details = traceback.format_exc() if isinstance(exception, Exception) else str(exception)
     print(f"{message}: {error_details}")
+    
     log_data[csv_file] = {"status": "error", "message": message, "details": error_details}
     save_json_log(LOG_FILE, log_data)
 

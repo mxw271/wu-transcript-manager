@@ -39,6 +39,7 @@ def process_csv_file(csv_file, log_data):
             handle_csv_error(csv_file, log_data, "Error during structuring", structured_result.get("message", "Unknown error"))
             return
         structured_df = structured_result["data"]
+        warnings = structured_result.get("warnings", None)
     except Exception as e:
         handle_csv_error(csv_file, log_data, "Unexpected error while structuring data", e)
         return
@@ -61,6 +62,12 @@ def process_csv_file(csv_file, log_data):
     try:
         # Save the data to the database
         save_result = save_to_database(structured_df, DATABASE_FILE)
+
+        # Include warnings if present
+        if warnings:
+            save_result["warnings"] = warnings
+            print("⚠️ Warnings:", warnings)
+
         log_data[csv_file] = save_result
         save_json_log(LOG_FILE, log_data)
         print(f"✅ Finished processing {csv_file}.")

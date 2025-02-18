@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS courses (
     course_name VARCHAR(255) NOT NULL,
     credits_earned FLOAT DEFAULT NULL,
     grade VARCHAR(8) DEFAULT NULL,
+    is_passed BOOLEAN DEFAULT NULL,
     should_be_category VARCHAR(255) NOT NULL,
     adjusted_credits_earned FLOAT NOT NULL DEFAULT 0,
     row_hash TEXT NOT NULL UNIQUE, 

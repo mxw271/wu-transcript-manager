@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 
 from data_pipeline import process_file
 from db_service import check_database_status, query_transcripts
-from utils import MAX_FILES, SearchCriteria, load_course_categories, is_allowed_file, format_name, generate_summary_df
+from utils import MAX_FILES, SearchCriteria, load_course_categories, is_allowed_file, generate_summary_df
 
 app = FastAPI()
 
