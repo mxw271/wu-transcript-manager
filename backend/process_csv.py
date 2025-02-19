@@ -48,30 +48,39 @@ def df_to_nested_dict(df: pd.DataFrame) -> dict:
         "minor": "",
         "institution_name": "",
         "awarded_date": "",
-        "overall_credits_earned": "",
-        "overall_gpa": "",
+        "overall_credits_earned": None,
+        "overall_gpa": None,
         "courses": []
     })
 
     for _, row in df.iterrows():
-        degree_key = (row["institution_name"], row["degree"], row["major"], row["minor"], row["awarded_date"])
+        # Normalize key values to prevent minor differences causing duplicate degrees
+        institution = row["institution_name"].strip() if pd.notna(row["institution_name"]) else ""
+        degree = row["degree"].strip() if pd.notna(row["degree"]) else ""
+        major = row["major"].strip() if pd.notna(row["major"]) else ""
+        minor = row["minor"].strip() if pd.notna(row["minor"]) else ""
+        awarded_date = row["awarded_date"].strip() if pd.notna(row["awarded_date"]) else ""
 
-        if not degrees[degree_key]["degree"]:  # Only set these once per degree
+        # Create a standardized key for degree grouping
+        degree_key = (institution.lower(), degree.lower(), major.lower(), minor.lower(), awarded_date)
+
+        # Populate degree details only once
+        if not degrees[degree_key]["degree"]: 
             degrees[degree_key].update({
-                "degree": row["degree"] if pd.notna(row["degree"]) else "",
-                "major": row["major"] if pd.notna(row["major"]) else "",
-                "minor": row["minor"] if pd.notna(row["minor"]) else "",
-                "institution_name": row["institution_name"],
-                "awarded_date": row["awarded_date"] if pd.notna(row["awarded_date"]) else "",
+                "degree": degree,
+                "major": major,
+                "minor": minor,
+                "institution_name": institution,
+                "awarded_date": awarded_date,
                 "overall_credits_earned": row["overall_credits_earned"] if pd.notna(row["overall_credits_earned"]) else None,
                 "overall_gpa": row["overall_gpa"] if pd.notna(row["overall_gpa"]) else None,
             })
 
         # Add course information under the respective degree
         degrees[degree_key]["courses"].append({
-            "course_name": row["course_name"],
+            "course_name": row["course_name"].strip(),
             "credits_earned": row["credits_earned"],
-            "grade": row["grade"],
+            "grade": row["grade"].strip(),
             "is_passed": None  # Placeholder, can be computed based on grading rules
         })
 
@@ -175,6 +184,7 @@ def process_csv_file(csv_file, log_file, log_data):
         return
 
     extracted_dict = df_to_nested_dict(df)
+    print("Extracted data:", json.dumps(extracted_dict, indent=4))
 
     # Renew file_name
     csv_base_name = os.path.splitext(os.path.basename(csv_file))[0]
