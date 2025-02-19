@@ -14,7 +14,7 @@ from text_processing.formatting import generate_data_dict_using_openai, preproce
 from text_processing.validation import rule_based_validation, validate_coursework_openai, openai_based_validation
 from text_processing.matching import match_courses_using_openai, match_courses_using_sbert
 from db_service import insert_records_from_dict
-from utils import PASSING_GRADES, GRADE_RANKING, load_course_categories, get_valid_value, categorize_degree, calculate_adjusted_credits, generate_row_hash
+from utils import load_course_categories, get_valid_value, categorize_degree, calculate_adjusted_credits, generate_row_hash
 
 
 # Specify the output directory
@@ -65,34 +65,13 @@ def extract_data(file_path: str) -> dict:
         # Add the file name to the DataFrame
         data_dict["file_name"] = os.path.basename(file_path)
 
-        #print("Extracted data:", json.dumps(data_dict, indent=4))
+        print("Extracted data:", json.dumps(data_dict, indent=4))
 
         # Save the JSON obejct to a file
         json_path = os.path.join(OUTPUT_FOLDER, f"{Path(file_path).stem}_extracted_data_dict.json")
         with open(json_path, "w") as json_file:
             json.dump(data_dict, json_file, indent=4)
         print(f"JSON object saved to: {json_path}")
-
-        '''
-        # Format the data to a DataFrame
-        print("Formatting data into a DataFrame...")
-        formatted_df = json_data_to_dataframe(json_data)
-        if formatted_df is None or formatted_df.empty:
-            return {
-                "status": "error",
-                "message": "Formatted DataFrame is empty. OpenAI response might be incorrect.",
-                "details": "Check if the extracted text is properly structured before sending to OpenAI.",
-                "file": file_path
-            }
-
-        # Add the file name to the DataFrame
-        formatted_df["file_name"] = os.path.basename(file_path)
-
-        # Save the formatted data to a new CSV file
-        formatted_table_path = os.path.join(OUTPUT_FOLDER, "formatted_table_openai.csv")
-        formatted_df.to_csv(formatted_table_path, index=False, encoding="utf-8")
-        print(f"Formatted transcript saved to: {formatted_table_path}")
-        '''
 
         return {
             "status": "success", 
@@ -149,7 +128,7 @@ def validate_data(data_dict: dict) -> dict:
                 "details": "Check for issues in OpenAI validation output."
             }
 
-       # print("Validated data:", json.dumps(corrected_dict, indent=4))
+        print("Validated data:", json.dumps(corrected_dict, indent=4))
 
         # Save the JSON obejct to a file
         json_path = os.path.join(OUTPUT_FOLDER, f"{os.path.splitext(corrected_dict["file_name"])[0]}_validated_data_dict.json")

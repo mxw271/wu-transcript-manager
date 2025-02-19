@@ -27,7 +27,7 @@ def match_courses_using_openai(course_names: list, categories_dict: dict, temper
     """
     openai_client = get_openai_client()
     retry_attempts = 3
-
+    
     # Convert dictionary to a formatted list for better clarity in the prompt
     categories_prompt = "\n".join([f"- **{name}**: {desc}" for name, desc in categories_dict.items()])
 

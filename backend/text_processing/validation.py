@@ -322,13 +322,15 @@ def validate_coursework_openai(course_name, credits_earned, grade, temperature: 
     - Grade: {grade}
 
     Check if the course is commonly offered, if the credits make sense, and whether the grade is a valid academic grade.
+    
     **Rules:**
     - Return only valid JSON, with no extra text, comments, or markdown formatting.
     - No explanations, just the JSON output.
     - If a field is empty, leave it as an empty value.
-    - Check statistical anomalies for credits earned. 
+    - Check for statistical anomalies in credits earned, but **DO NOT modify credits that already match standard academic formats (e.g., 3.0, 7.5, 15.0, 30.0, etc.).**
+    - If credits earned seem unusual but match common values in the transcript, **do not change them**.
     - If a grade is a numeric grade, do not convert it to a letter grade, and vice versa. The grade should be returned as a string.
-    - If you cannot decide, convert the original value of the field into the correct format and return it.
+    - If uncertain, return the original value without modifications.
     
     Return the corrections as a JSON object following this structure:
     ```json
@@ -454,38 +456,6 @@ def openai_based_validation(data_dict) -> dict:
 
         # Preserve file_name if it exists
         corrected_data["file_name"] = get_valid_value(data_dict.get("file_name", ""))
-
-        '''
-        # Corrected Data Assignment
-        corrected_data["middle_name"] = (
-            [] if not data_dict.get("middle_name") else 
-            [corrected_names.get("middle_name", get_valid_value(data_dict.get("student_middleName")))]
-        )
-        corrected_data["degree"] = (
-            [] if not data_dict.get("degree") else 
-            [corrected_academic_info.get("degree", get_valid_value(data_dict.get("degree")))]
-        )
-        corrected_data["major"] = (
-            [] if not data_dict.get("major") else 
-            [corrected_academic_info.get("major", get_valid_value(data_dict.get("major")))]
-        )
-        corrected_data["minor"] = (
-            [] if not data_dict.get("minor") else 
-            [corrected_academic_info.get("minor", get_valid_value(data_dict.get("minor")))]
-        )
-        corrected_data["awarded_date"] = (
-            [] if not data_dict.get("awarded_date") else 
-            [corrected_awarded_date.get("awarded_date", get_valid_value(data_dict.get("awarded_date")))]
-        )
-        corrected_data["overall_credits_earned"] = (
-            [] if not data_dict.get("overall_credits_earned") else 
-            [corrected_performance.get("overall_credits_earned", get_valid_value(data_dict.get("overall_credits_earned"), None))]
-        )
-        corrected_data["overall_gpa"] = (
-            [] if not data_dict.get("overall_gpa") else 
-            [corrected_performance.get("overall_gpa", get_valid_value(data_dict.get("overall_gpa"), None))]
-        )
-        '''
         return corrected_data
 
     except Exception as e:

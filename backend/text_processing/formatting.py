@@ -79,7 +79,7 @@ def generate_data_dict_using_openai(text, temperature: float = TEMPERATURE):
     - Course names may contain abbreviations or special characters: expand abbreviations (e.g., "Mgmt" → "Management"); preserve special characters (e.g., "&" remains "&").
     - Course codes contain abbreviations and numbers. Discard course codes and extract only course names.
     - If credits earned is missing for a course, look for credits attempted or credits from the same course. Credits earned may be displayed as an abbreviation (e.g., CrE).
-    - The grade is either a letter grade (e.g., A, B+) or a numeric grade. If numeric, convert it into a string.
+    - The grade is either a letter grade (e.g., A, B+) or a numeric grade. Look for letter grade first. If only numeric grade is found, convert it into a string.
     - Use the grading system from the transcript to determine "is_passed": if the grade is a passing grade for the program, "is_passed" = True; if not, "is_passed" = False.
     - The number of items in "course_name", "credits_earned", and "grade" lists must match. If not, redo extraction.
     - The sum of "credits_earned" for a degree must match "overall_credits_earned". If not, redo extraction.

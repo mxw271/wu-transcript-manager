@@ -15,9 +15,9 @@ MAX_FILES = 300
 
 # Constants for passing grades based on degree level
 PASSING_GRADES = {
-    "Doctorate": "C",
-    "Master": "C",
-    "Bachelor": "D"
+    "Doctorate": {"letter": "C", "numeric": 70.0},
+    "Master": {"letter": "C", "numeric": 70.0},
+    "Bachelor": {"letter": "D", "numeric": 60.0}
 }
 
 
@@ -158,13 +158,13 @@ def save_json_log(log_file, log_data):
 
 
 # Function for error handling
-def handle_csv_error(csv_file, log_data, message, exception):
+def handle_csv_error(csv_file, log_file, log_data, message, exception):
     """Handles and logs errors during CSV processing."""
     error_details = traceback.format_exc() if isinstance(exception, Exception) else str(exception)
     print(f"{message}: {error_details}")
     
     log_data[csv_file] = {"status": "error", "message": message, "details": error_details}
-    save_json_log(LOG_FILE, log_data)
+    save_json_log(log_file, log_data)
 
 
 # Function to format educator's full name
