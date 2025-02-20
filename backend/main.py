@@ -142,7 +142,7 @@ def search_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)
 
     try:
         results = query_transcripts(conn, criteria_dict)
-
+            
         # Handling errors from query_transcripts()
         if results == "error":
             return JSONResponse(
@@ -170,7 +170,7 @@ def search_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)
             "Educator First Name", "Educator Middle Name", "Educator Last Name", 
             "Degree", "Degree Level", "Course Name", "Course Category", "Adjusted Credits Earned"
         ])
-    
+
         # Generate a summary DataFrame
         summary_df = generate_summary_df(criteria_dict, df)
 

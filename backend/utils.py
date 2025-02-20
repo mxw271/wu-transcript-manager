@@ -188,7 +188,8 @@ def generate_summary_df(
         pd.DataFrame: Processed summary DataFrame with categories and course details.
     """
     # Load categorized courses data from JSON
-    unique_categories = load_course_categories()
+    categories_dict = load_course_categories()
+    unique_categories = list(categories_dict.keys())
     unique_categories.append("Uncategorized")
 
     # Initialize dictionary to store course details for each category
