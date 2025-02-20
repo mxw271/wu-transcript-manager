@@ -4,11 +4,6 @@ SETLOCAL ENABLEDELAYEDEXPANSION
 
 echo Setting Up WU Transcript Manager...
 
-:: --- Script Directory Setup --- 
-set "SCRIPT_DIR=%~dp0"
-cd /d %SCRIPT_DIR%
-echo Running in: %CD%
-
 :: --- Check if Running as Administrator ---
 fsutil dirty query %SystemDrive% >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
@@ -18,6 +13,11 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b
 )
 
+:: --- Script Directory Setup --- 
+set "SCRIPT_DIR=%~dp0"
+cd /d %SCRIPT_DIR%
+echo Running in: %CD%
+
 :: --- Dependency Checks ---
 echo Checking dependencies...
 
@@ -25,7 +25,10 @@ echo Checking dependencies...
 echo Checking for Python 3.9+...
 set "PYTHON_PATH="
 set "PYTHON_VERSION="
+
+:: Find Python via where
 for /f "tokens=*" %%p in ('where python 2^>nul') do (
+    ::set "PYTHON_PATH=%%p"
     for /f "tokens=2 delims= " %%v in ('"%%p" --version 2^>nul') do (
         set "PYTHON_VERSION=%%v"
         for /f "tokens=1,2 delims=." %%a in ("%%v") do (
@@ -38,6 +41,9 @@ for /f "tokens=*" %%p in ('where python 2^>nul') do (
         )
     )
 )
+:: Find Python in Registry
+::for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\Python\PythonCore\3.9\InstallPath" /v ExecutablePath 2^>nul') do set "PYTHON_PATH=%%b"
+
 :PYTHON_FOUND
 if defined PYTHON_PATH (
     echo Python 3.9+ detected: %PYTHON_PATH%. Version: %PYTHON_VERSION%
@@ -66,9 +72,8 @@ if defined PYTHON_PATH (
     :: Set Python path
     set "PYTHON_PATH=C:\Program Files\Python!PYTHON_VERSION:~0,1!!PYTHON_VERSION:~2,2!\python.exe"
     set "PYTHON_DIR=C:\Program Files\Python!PYTHON_VERSION:~0,1!!PYTHON_VERSION:~2,2!"
-    echo PYTHON_PATH: "!PYTHON_PATH!"
-    echo PYTHON_DIR: "!PYTHON_DIR!"
     setx PATH "!PATH!;!PYTHON_DIR!;!PYTHON_DIR!\Scripts" /M
+    set "PATH=!PATH!;!PYTHON_DIR!;!PYTHON_DIR!\Scripts"
 
     :: Wait for installation to complete and delete installation file.
     timeout /t 10 >nul
@@ -125,10 +130,11 @@ if defined NODE_PATH (
     curl -O %NODE_URL%
     start /wait msiexec /i %NODE_MSI% /quiet
     
-    set "NODE_PATH=C:\Program Files\nodejs\node.exe"
-    echo NODE_PATH: "!NODE_PATH!"
-    echo NODE_PATH: "%NODE_PATH%"
+    :: Set Node.js path
+    ::set "NODE_PATH=C:\Program Files\nodejs\node.exe"
+    for /f "tokens=*" %%n in ('where node 2^>nul') do set "NODE_PATH=%%n"
     setx PATH "%PATH%;C:\Program Files\nodejs;" /M
+    set "PATH=%PATH%;C:\Program Files\nodejs;"
 
     :: Wait for installation to complete and delete installation file.
     timeout /t 10 >nul
@@ -164,7 +170,6 @@ if defined TESS_PATH (
     echo Tesseract 5.3+ missing. Installing...
 
     for /f "tokens=*" %%a in ('curl -s https://api.github.com/repos/UB-Mannheim/tesseract/releases/latest ^| findstr /i "browser_download_url" ^| findstr /i ".exe"') do (
-        echo %%a
         for /f "tokens=3 delims=:" %%b in ("%%a") do (
             set "TESS_URL=https:%%b"
             set "TESS_URL=!TESS_URL:~0,-1!"
@@ -172,15 +177,14 @@ if defined TESS_PATH (
         )
     )
     :TESS_URL_FOUND
-    echo %TESS_URL%
-    echo !TESS_URL!
     curl -L -o tesseract-installer.exe !TESS_URL!
     start /wait tesseract-installer.exe /SILENT
      
-    set "TESS_PATH=C:\Program Files\Tesseract-OCR\tesseract.exe"
-    echo %TESS_PATH%
-    echo !TESS_PATH!
+    :: Set Tesseractpath
+    ::set "TESS_PATH=C:\Program Files\Tesseract-OCR\tesseract.exe"
+    for /f "tokens=*" %%t in ('where tesseract 2^>nul') do set "TESS_PATH=%%t"
     setx PATH "%PATH%;C:\Program Files\Tesseract-OCR;" /M
+    set "PATH=%PATH%;C:\Program Files\Tesseract-OCR;"
   
     :: Wait for installation to complete and delete installation file.
     timeout /t 10 >nul
@@ -198,7 +202,7 @@ cd "%SCRIPT_DIR%\backend"
 :: Create virtual environment
 if not exist venv (
     echo Creating Python virtual environment...
-    "%PYTHON_PATH%" -m venv venv
+    "!PYTHON_PATH!" -m venv venv
 )
 
 :: Activate virtual environment
@@ -208,12 +212,11 @@ echo Virtual environment activated.
 :: Install dependencies
 echo Installing backend dependencies...
 if exist "requirements.txt" (
-    "%PYTHON_PATH%" -m pip install --upgrade pip
+    "!PYTHON_PATH!" -m pip install --upgrade pip
     pip install -r requirements.txt
 ) else (
     echo No requirements.txt found. Skipping dependency installation.
 )
-
 
 :: ---- Database Setup ----
 echo Setting up database...
@@ -280,7 +283,8 @@ echo Setting up the frontend...
 :: Create frontend directory if it doesn't exist
 if not exist "%SCRIPT_DIR%frontend" (
     echo Creating React app...
-    call "%NODE_PATH%" exec npx create-react-app frontend || echo Error running npx && pause
+    ::call "%NODE_PATH%" exec npx create-react-app frontend || echo Error running npx && pause
+    call npx create-react-app frontend
 )
 cd frontend
 
@@ -292,7 +296,8 @@ for /f "delims=" %%n in ('where npm 2^>nul') do (
 
 :: Install frontend dependencies
 echo Installing frontend dependencies...
-call "%NPM_PATH%" install --legacy-peer-deps
+::call "%NPM_PATH%" install --legacy-peer-deps
+call npm install --legacy-peer-deps
 
 cd ..
 
