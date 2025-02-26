@@ -108,14 +108,8 @@ def load_data(file_path: str) -> dict:
         # Convert defaultdict to list of degrees
         data_dict["degrees"] = list(degrees.values())
 
-        # Renew file_name
-        csv_base_name = os.path.splitext(os.path.basename(file_path))[0]
-        if "file_name" in data_dict and data_dict["file_name"]:
-            file_name_parts = data_dict["file_name"].split("_page")[0]
-            if csv_base_name != file_name_parts:
-                data_dict["file_name"] = f"{file_name_parts}.pdf"
-        else: 
-            data_dict["file_name"] = f"{csv_base_name}.pdf"
+        # Add the file name to the DataFrame
+        data_dict["file_name"] = os.path.basename(file_path)
 
         print("Loaded data:", json.dumps(data_dict, indent=4))
 
