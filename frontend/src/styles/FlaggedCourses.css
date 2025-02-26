@@ -1,0 +1,54 @@
+/* Container for the table */
+.flagged-courses-container {
+  margin: 20px 0;
+  font-weight: bold;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.flagged-courses-container:focus{
+  box-shadow: none !important; 
+}
+
+.flagged-courses-container th, 
+.flagged-courses-container td {
+  padding: 4px;
+  text-align: left;
+  font-size: 0.9rem;
+  font-weight: normal;
+}
+
+.flagged-courses-container th {
+  background-color: #f4f4f4;
+  font-weight: bold;
+}
+
+/* Select field for corrected category */
+.flagged-courses-container .select-category {
+  width: 150px;
+}
+
+/* Input field for corrected credits earned */
+.flagged-courses-container .input-credit {
+  width: 60px;
+}
+
+/* Select field for corrected is_passed */
+.flagged-courses-container .select-passed {
+  width: 60px;
+}
+
+/* Submit button */
+.flagged-courses-container .submit-decision {
+  margin: 20px 0;
+  padding: 20px 20px; 
+  font-size: 1.1rem; 
+  border: none; 
+  border-radius: 4px; 
+  background-color: #2e7ed3; 
+  color: white; 
+  cursor: pointer; 
+  text-align: center; 
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); 
+  transition: background-color 0.2s ease; 
+}

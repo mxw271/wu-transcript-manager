@@ -1,16 +1,17 @@
 import pandas as pd
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import json
 from pydantic import BaseModel
+import base64
 import hashlib
 import traceback
 
 
 # Constants for uploading file limits
-ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
+ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".csv"}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB in bytes
-MAX_FILES = 300
+MAX_FILES = 100
 
 
 # Constants for passing grades based on degree level
@@ -39,6 +40,35 @@ class SearchCriteria(BaseModel):
     education_level: List[str] = []
 
 
+# Define individual flagged course schema
+class FlaggedCourse(BaseModel):
+    course_name: str
+    should_be_category: Optional[str] = None
+    credits_earned: Optional[float] = None
+    grade: Optional[str] = None
+    is_passed: Optional[bool] = None
+
+
+# Define the structure for flagged degrees
+class FlaggedDegree(BaseModel):
+    file_name: str
+    degree: str
+    major: str
+    overall_credits_earned: Optional[float] = None
+    courses: List[FlaggedCourse]
+
+
+# Define the overall structure for flagged courses list
+class FlaggedCoursesList(BaseModel):
+    flagged_courses: List[FlaggedDegree]
+
+
+# Define course decision schema
+class UserDecision(BaseModel):
+    file_name: str
+    decisions: List[FlaggedDegree]
+
+
 # Load course categories from JSON file
 def load_course_categories(categories_file = "./course_categories.json"):
     # Check if the categories file exists
@@ -53,10 +83,26 @@ def load_course_categories(categories_file = "./course_categories.json"):
     return course_categories # Returns a dictionary of categories with descriptions
 
 
+# Decode file name from the frontend
+def decode_file_name(encoded_name: str) -> str:
+    """
+    Decode a base64 encoded file name safely, handling incorrect padding.
+    """
+    try:
+        # Fix incorrect padding by adding '=' if necessary
+        missing_padding = len(encoded_name) % 4
+        if missing_padding:
+            encoded_name += "=" * (4 - missing_padding)
+        return base64.b64decode(encoded_name).decode("utf-8")
+    except Exception as e:
+        print(f"Error decoding file name: {e}")
+        return None  # Return None if decoding fails
+
+
 # Function to check if the file extension is allowed
 def is_allowed_file(file):
     # Check if the file has an allowed extension
-    if not ("." in file.filename and file.filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS):
+    if not ("." in file.filename and os.path.splitext(file.filename)[-1].lower() in ALLOWED_EXTENSIONS):
         return False
 
     # Check if the file size is within the limit

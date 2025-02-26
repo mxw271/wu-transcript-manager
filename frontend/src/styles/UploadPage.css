@@ -28,11 +28,18 @@ input[type="file"]:hover {
   border-color: #2e7ed3;
 }
 
+/* Status */
+.status {
+  font-size: 1.1rem;
+  margin-bottom: 30px;
+}
+
 /* Success Message */
 .success-text {
-  color: #4CAF50;
-  font-size: 1em;
-  margin-top: 15px;
+  color: #4CAF50 !important;
+  font-size: 1em !important;
+  margin: 10px 0 !important;
+  white-space: pre-wrap;
 }
 
 /* Error Message */

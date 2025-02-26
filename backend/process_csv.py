@@ -8,7 +8,6 @@ import time
 import traceback
 from collections import defaultdict
 
-from clients_service import get_openai_client
 from data_pipeline import validate_data, structure_data, save_to_database
 from db_service import check_database_status
 from utils import PASSING_GRADES, GRADE_RANKING, load_json_log, save_json_log, handle_csv_error
@@ -90,87 +89,6 @@ def df_to_nested_dict(df: pd.DataFrame) -> dict:
     return data_dict
 
 
-# Function to generate is_pased based on the degree and grade
-def generate_is_passed_using_openai(data_dict, temperature: float = 0):
-    """
-    Uses OpenAI to determine if a course is passed based on the degree and grade.
-    Args:
-        data_dict (dict): The structured transcript data containing degrees and courses.
-        temperature (float): The randomness level in GPT response.
-    Returns:
-        dict: Updated data_dict with "is_passed" field added to each course.
-    """
-    openai_client = get_openai_client()  
-    retry_attempts = 3
-
-    for degree in data_dict["degrees"]:
-        degree_name = degree.get("degree", "")
-        courses = degree.get("courses", [])
-        print(degree_name)
-
-        # Prepare input for OpenAI
-        course_names = [course["course_name"] for course in courses]
-        grades = [course["grade"] for course in courses]
-
-        # Generate OpenAI prompt
-        prompt = f"""
-        You are an expert in academic evaluation. Your task is to determine whether a student has passed or failed each course based on the grade and degree type.
-
-        **Rules:**
-        - If the grade meets the passing criteria, return **True**; otherwise, return **False**.
-        - If a grade is empty or unrecognized, return **null**.
-        - The **output list MUST contain the EXACT same number of elements as the input course list**.
-        - Do **NOT** add extra items or remove any courses. The index order must be preserved.
-
-        **Degree:** {degree_name}
-        **Courses & Grades:**
-        {json.dumps(list(zip(course_names, grades)), indent=2)}
-
-        **Output Format:** Return **ONLY** a JSON list of Boolean values (`true` or `false`), in the same order as the course list.
-        """
-        print(len(course_names), len(grades))
-
-        for attempt in range(retry_attempts):
-            try:
-                response = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "You are an expert in evaluating academic course grades."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=temperature
-                )
-
-                result_text = response.choices[0].message.content.strip()
-                if not result_text:
-                    print("OpenAI returned an empty response.")
-                    continue
-
-                # Remove potential JSON code block formatting
-                result_text = result_text.replace("```json", "").replace("```", "").strip()
-
-                # Parse the response into a Python list
-                is_passed_list = json.loads(result_text)
-                print(len(is_passed_list))
-                print(is_passed_list)
-
-                # Validate output format
-                if isinstance(is_passed_list, list) and len(is_passed_list) == len(courses):
-                    # Assign is_passed values to each course
-                    for i, course in enumerate(courses):
-                        course["is_passed"] = is_passed_list[i] if is_passed_list[i] is not None else False
-                    break  # Exit retry loop if successful
-
-            except json.JSONDecodeError as e:
-                print(f"Error parsing JSON (Attempt {attempt+1}/{retry_attempts}): {e}")
-                print("OpenAI Response:", structured_text)
-            except Exception as e:
-                print(f"API error (Attempt {attempt+1}/{retry_attempts}): {e}")
-                time.sleep(2)
-
-    return data_dict
-
-
 # Function to process a CSV file
 def process_csv_file(csv_file, log_file, log_data):
     """Processes a single CSV file and inserts its data into the database."""
@@ -218,7 +136,7 @@ def process_csv_file(csv_file, log_file, log_data):
             handle_csv_error(csv_file, log_file, log_data, "Error during structuring", structured_result.get("message", "Unknown error"))
             return
 
-        structured_dict = structured_result["data"]
+        structured_dict = structured_result.get("data", {})
         if not structured_dict:
             handle_csv_error(csv_file, log_file, log_data, "Structuring returned empty data", "Possible reasons: Data extraction issues or AI processing failure.")
             return

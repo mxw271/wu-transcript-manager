@@ -11,7 +11,7 @@ from clients_service import get_openai_client
 
 
 # Set a randomness level for OpenAI
-TEMPERATURE = 0.3 # Lower value for more deterministic, precise, and consistent
+TEMPERATURE = 0.2 # Lower value for more deterministic, precise, and consistent
 
 
 # List of minor words that should remain lowercase (unless first word)
@@ -35,7 +35,7 @@ def generate_data_dict_using_openai(text, temperature: float = TEMPERATURE):
     openai_client = get_openai_client()
 
     prompt = f"""
-    Extract and organize the following data into a **valid JSON object**.
+    Extract and organize the following data into a **JSON object**.
     The JSON **must** follow this structure:
     ```json
     {{
@@ -52,8 +52,7 @@ def generate_data_dict_using_openai(text, temperature: float = TEMPERATURE):
                     {{
                         "course_name": "",
                         "credits_earned": "",
-                        "grade": "",
-                        "is_passed": ""
+                        "grade": ""
                     }}
                 ]
             }}
@@ -65,9 +64,11 @@ def generate_data_dict_using_openai(text, temperature: float = TEMPERATURE):
         }}
     }}
     ```
-    **Rules:**
-    - Return only valid JSON, with no extra text, comments, or markdown formatting.
+    **Instructions (STRICT RULES)**:
+    - Return only JSON, with no extra text, comments, or markdown formatting.
     - No explanations, just the JSON output.
+    - If a field is missing from the input, return it as an empty string ("") in the JSON output.
+    - Only return data that is **explicitly found** in the intput. **Never fabricate, assume, infer, or guess missing values, unless it's instructed**.
     - The dictionary keys must match the exact structure specified.
     - All degree-related fields (degree, major, minor, institution_name, awarded_date, overall_credits_earned, overall_gpa) must be grouped under degrees.
     - Each degree must contain a list of its corresponding courses.
@@ -80,12 +81,10 @@ def generate_data_dict_using_openai(text, temperature: float = TEMPERATURE):
     - Course codes contain abbreviations and numbers. Discard course codes and extract only course names.
     - If credits earned is missing for a course, look for credits attempted or credits from the same course. Credits earned may be displayed as an abbreviation (e.g., CrE).
     - The grade is either a letter grade (e.g., A, B+) or a numeric grade. Look for letter grade first. If only numeric grade is found, convert it into a string.
-    - Use the grading system from the transcript to determine "is_passed": if the grade is a passing grade for the program, "is_passed" = True; if not, "is_passed" = False.
-    - The number of items in "course_name", "credits_earned", and "grade" lists must match. If not, redo extraction.
-    - The sum of "credits_earned" for a degree must match "overall_credits_earned". If not, redo extraction.
+    - If grade is missing for a course, return an empty string ("") in the JSON output.
+    - Do not convert a letter grade to a numeric grade, and vice versa.
     - Ensure numerical values are properly formatted (e.g., 3.0, 4.5 for credits; 3.33 for GPA).
     - Capitalize only important words. Keep minor words lowercase (e.g., "of", "in", "the") unless they start a sentence.
-    - If a field is not found, use an empty string ("") for single values and an empty list ([]) for lists.
 
     **Input Data:**
     ```
@@ -198,8 +197,7 @@ def preprocess_data_dict(data_dict: dict) -> dict:
         "overall_credits_earned": format_float,
         "overall_gpa": format_float,
         "course_name": format_title,
-        "credits_earned": format_float,
-        "is_passed": format_boolean
+        "credits_earned": format_float
     }
 
     formatted_data = {"student": {}, "degrees": {}, "file_name": data_dict["file_name"]}
@@ -268,8 +266,7 @@ def json_data_to_dataframe(json_data):
             "overall_gpa": [json_data.get("overall_gpa", [""])[0] if json_data.get("overall_gpa") else ""] * max_len,
             "course_name": course_names,
             "credits_earned": credits_earned,
-            "grade": grades,
-            "is_passed": is_passed
+            "grade": grades
         })
 
         return df

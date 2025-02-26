@@ -11,7 +11,7 @@ from clients_service import get_openai_client, get_sbert_model
 THRESHOLD = 0.7  # Matches below this threshold will be marked as "Uncategorized"
 
 # Set a randomness level for OpenAI
-TEMPERATURE = 0.3 # Lower value for more deterministic, precise, and consistent
+TEMPERATURE = 0.2 # Lower value for more deterministic, precise, and consistent
 
 
 # Function to get the best match for a course name using OpenAI

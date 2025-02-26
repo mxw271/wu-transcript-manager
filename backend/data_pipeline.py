@@ -8,13 +8,19 @@ from pathlib import Path
 from typing import Dict, Any, List
 import time
 import traceback
+from collections import defaultdict
+import asyncio
+from asyncio import Lock
 
 from text_processing.extraction import extract_text_from_file_using_opencv, extract_text_from_file_using_azure
 from text_processing.formatting import generate_data_dict_using_openai, preprocess_data_dict, json_data_to_dataframe
 from text_processing.validation import rule_based_validation, validate_coursework_openai, openai_based_validation
 from text_processing.matching import match_courses_using_openai, match_courses_using_sbert
 from db_service import insert_records_from_dict
-from utils import load_course_categories, get_valid_value, categorize_degree, calculate_adjusted_credits, generate_row_hash
+from utils import (
+    ALLOWED_EXTENSIONS, PASSING_GRADES, GRADE_RANKING, load_course_categories, get_valid_value, 
+    categorize_degree, calculate_adjusted_credits, generate_row_hash
+)
 
 
 # Specify the output directory
@@ -22,12 +28,123 @@ OUTPUT_FOLDER = "./middle_products"
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 
-# Step 1: Extract data from the file 
+global_lock = Lock()  # Global lock to synchronize file processing
+
+
+# Step 1 option 1: Load data from csv file 
+def load_data(file_path: str) -> dict:
+    """
+    Load data from a CSV and formats it into a nested dictionary.
+    Args:
+        file_path (str): Path to the CSV file.
+    Returns:
+        dict: Result containing status, message, and extracted JSON object.
+    """
+    try:
+        # Load CSV into a DataFrame
+        print("Loading data from CSV...")
+        df = pd.read_csv(file_path)
+        if df.empty:
+            return {
+                "status": "error",
+                "message": "CSV file is empty.",
+                "details": "Ensure the CSV contains readable data.",
+                "file": file_path
+            }
+
+        # Initialize the data dictionary
+        data_dict = {"student": {}, "degrees": [], "file_name": df["file_name"].iloc[0] if "file_name" in df else ""}
+
+        # Extract student details
+        data_dict["student"] = {
+            "first_name": df["first_name"].iloc[0] if "first_name" in df else "",
+            "middle_name": df["middle_name"].iloc[0] if "middle_name" in df and pd.notna(df["middle_name"].iloc[0]) else "",
+            "last_name": df["last_name"].iloc[0] if "last_name" in df else "",
+        }
+
+        # Group courses by unique degree
+        degrees = defaultdict(lambda: {
+            "degree": "",
+            "major": "",
+            "minor": "",
+            "institution_name": "",
+            "awarded_date": "",
+            "overall_credits_earned": None,
+            "overall_gpa": None,
+            "courses": []
+        })
+
+        print("Organizing courses by degree...")
+        for _, row in df.iterrows():
+            # Normalize key values to prevent minor differences causing duplicate degrees
+            institution = row["institution_name"].strip() if "institution_name" in row and pd.notna(row["institution_name"]) else ""
+            degree = row["degree"].strip() if "degree" in row and pd.notna(row["degree"]) else ""
+            major = row["major"].strip() if "major" in row and pd.notna(row["major"]) else ""
+            minor = row["minor"].strip() if "minor" in row and pd.notna(row["minor"]) else ""
+            awarded_date = row["awarded_date"].strip() if "awarded_date" in row and pd.notna(row["awarded_date"]) else ""
+
+            # Create a standardized key for degree grouping
+            degree_key = (institution.lower(), degree.lower(), major.lower(), minor.lower(), awarded_date)
+
+            # Populate degree details only once
+            if not degrees[degree_key]["degree"]: 
+                degrees[degree_key].update({
+                    "degree": degree,
+                    "major": major,
+                    "minor": minor,
+                    "institution_name": institution,
+                    "awarded_date": awarded_date,
+                    "overall_credits_earned": row["overall_credits_earned"] if "overall_credits_earned" in row and pd.notna(row["overall_credits_earned"]) else None,
+                    "overall_gpa": row["overall_gpa"] if "overall_gpa" in row and pd.notna(row["overall_gpa"]) else None,
+                })
+
+            # Add course information under the respective degree
+            degrees[degree_key]["courses"].append({
+                "course_name": row["course_name"].strip() if "course_name" in row and pd.notna(row["course_name"]) else "",
+                "credits_earned": row["credits_earned"] if "credits_earned" in row and pd.notna(row["credits_earned"]) else None,
+                "grade": row["grade"].strip() if "grade" in row and pd.notna(row["grade"]) else "",
+            })
+
+        # Convert defaultdict to list of degrees
+        data_dict["degrees"] = list(degrees.values())
+
+        # Renew file_name
+        csv_base_name = os.path.splitext(os.path.basename(file_path))[0]
+        if "file_name" in data_dict and data_dict["file_name"]:
+            file_name_parts = data_dict["file_name"].split("_page")[0]
+            if csv_base_name != file_name_parts:
+                data_dict["file_name"] = f"{file_name_parts}.pdf"
+        else: 
+            data_dict["file_name"] = f"{csv_base_name}.pdf"
+
+        print("Loaded data:", json.dumps(data_dict, indent=4))
+
+        print("Data loaded successfully.")
+        return {
+            "status": "success",
+            "message": "CSV file loaded successfully.",
+            "file": file_path,
+            "data": data_dict
+        }
+    
+    except Exception as e:
+        error_message = f"Error loading data from file: {str(e)}"
+        print(error_message)
+        print(traceback.format_exc())  # Print full traceback for debugging
+        return {
+            "status": "error",
+            "message": error_message,
+            "details": traceback.format_exc(),
+            "file": file_path
+        }
+
+
+# Step 1 option 2: Extract data from pdf / jpg / jpeg / png file 
 def extract_data(file_path: str) -> dict:
     """
-    Extracts text from a PDF, processes it using OpenAI, and formats it into a DataFrame.
+    Extracts text from a PDF, processes it using OpenAI, and formats it into a nested dictionary.
     Args:
-        file_path (str): Path to the PDF file.
+        file_path (str): Path to the PDF / JPG / JPEG / PNG file.
     Returns:
         dict: Result containing status, message, and extracted JSON object.
     """
@@ -153,24 +270,30 @@ def validate_data(data_dict: dict) -> dict:
 
 
 # Step 3: Structure validated data
-def structure_data(data_dict: dict) -> dict:
+async def structure_data(data_dict: dict) -> dict:
     """
     Reads the extracted transcript data, 
         matches course names to predefined categories using OpenAI, 
-        processes degree levels and adjusted credits,
-        and generate row hash.
+        processes degree levels and adjusted credits, generate row hash,
+        and handles flagged courses.
     Args:
         data_dict (dict): The raw extracted transcript data.
     Returns:
         dict: A dictionary with status, message, and structured data.
-    """
-    warnings = []
-
+    """    
     # Load course categories
     categories_dict = load_course_categories()
 
-    # Iterate through each degree and process its courses
+    # Initialize the list for flagged courses
+    flagged_courses_list = []
+
+    # Iterate through each degree and process its courses, check whether user decisions are needed
     for degree in data_dict.get("degrees", []):
+        # Assign degree level
+        degree["degree_level"] = categorize_degree(degree.get("degree", ""))
+
+        # Initialize flag for uncategorized course
+        course_uncategorized_flag = False
         course_names = [course["course_name"] for course in degree["courses"]]
 
         # Perform text matching using OpenAI
@@ -179,25 +302,154 @@ def structure_data(data_dict: dict) -> dict:
 
         # If OpenAI fails, fallback to SBERT
         if not categorized_courses or all(category == "Uncategorized" for category in categorized_courses):
-            warnings.append(f"OpenAI classification failed for degree: {degree.get('degree', '')}.")
             print("OpenAI classification failed or returned all 'Uncategorized'. Falling back to SBERT...")
+            course_uncategorized_flag = True
             categories_list = list(categories_dict.keys())
             categorized_courses = match_courses_using_sbert(course_names, categories_list)
 
         # If SBERT also fails, default to Uncategorized
         if not categorized_courses or all(category == "Uncategorized" for category in categorized_courses):
-            warnings.append(f"SBERT classification also failed for degree: {degree.get('degree', '')}. Defaulting to 'Uncategorized'.")
             print("SBERT classification also failed, defaulting all categories to 'Uncategorized'.")
+            course_uncategorized_flag = True
 
-        # Assign categories to courses
         for i, course in enumerate(degree["courses"]):
             course["should_be_category"] = categorized_courses[i] if categorized_courses else "Uncategorized"
+        
+        # Initialize flag for credit mismatch
+        credit_mismatch_flag = False
 
-        # Assign degree level
-        degree["degree_level"] = categorize_degree(degree.get("degree", ""))
+        # Calculate sum of credits earned for this degree
+        total_credits_earned = sum(
+            float(course["credits_earned"]) if isinstance(course["credits_earned"], float) and course["credits_earned"] else 0
+            for course in degree["courses"]
+        )
 
-        # Process courses inside the degree
+        # Check if total credits earned matches the overall credits earned
+        if degree.get("overall_credits_earned"):
+            try:
+                overall_credits = float(degree["overall_credits_earned"])
+                if abs(total_credits_earned - overall_credits) > 0.01:  # Allow minor floating-point precision errors
+                    credit_mismatch_flag = True
+            except ValueError:
+                credit_mismatch_flag = True
+        else:
+            credit_mismatch_flag = True
+
+        passing_grade = PASSING_GRADES.get(degree["degree_level"], PASSING_GRADES["Bachelor"])  # Default to Bachelor
+           
+        # Determine is_passed
         for course in degree["courses"]:
+            grade = course.get("grade", "").strip()
+            if not grade: 
+                course["is_passed"] = "Unknown"
+            else:
+                try: # Determine if grade is numeric
+                    numeric_grade = float(grade)
+                    course["is_passed"] = numeric_grade >= passing_grade["numeric"]
+                except ValueError: # Grade is not a number, check letter grade
+                    letter_grade = grade.upper()
+                    if letter_grade in GRADE_RANKING:
+                        course["is_passed"] = GRADE_RANKING[letter_grade] >= GRADE_RANKING[passing_grade["letter"]]
+                    else:
+                        course["is_passed"] = "Unknown"
+
+        # Construct the flagged courses nested dictionary
+        flagged_courses = []
+        for course in degree["courses"]:
+            flagged_course = { "course_name": course["course_name"] }
+            
+            if course_uncategorized_flag:
+                flagged_course["should_be_category"] = course["should_be_category"]
+
+            if credit_mismatch_flag:
+                flagged_course["credits_earned"] = course.get("credits_earned", "")
+
+            if course["is_passed"] == "Unknown": 
+                flagged_course["grade"] = course.get("grade", "")
+                flagged_course["is_passed"] = course["is_passed"]
+
+            # Only append if at least one condition is met
+            if len(flagged_course) > 1:
+                flagged_courses.append(flagged_course)
+
+        # Add to the final list only if there are flagged courses
+        if flagged_courses:
+            flagged_degree = {
+                "file_name": data_dict.get("file_name", ""),
+                "degree": degree.get("degree", ""),
+                "major": degree.get("major"),
+                "courses": flagged_courses
+            }
+
+            if credit_mismatch_flag:
+                flagged_degree["overall_credits_earned"] = degree.get("overall_credits_earned", "")
+
+            flagged_courses_list.append(flagged_degree)
+
+    file_name = data_dict.get("file_name", "")
+
+    # Call frontend for user decision if flagged courses exist
+    if flagged_courses_list:
+        print(flagged_courses_list)
+        print(f"⚠️ User input required: Pausing processing for {file_name}. Waiting for user decisions...")
+
+        # Store flagged courses and create lock for processing
+        from main import flagged_courses_store, processing_lock, user_decisions_store, notify_flagged_courses_ready
+        flagged_courses_store[file_name] = flagged_courses_list
+
+        # Notify frontend via WebSocket
+        asyncio.create_task(notify_flagged_courses_ready(file_name))
+
+        # Create processing lock and wait for user input
+        processing_lock[file_name] = asyncio.Event()
+        await processing_lock[file_name].wait()
+
+        # Apply user decisions
+        user_decisions = user_decisions_store.get(file_name, [])
+        if user_decisions:
+            # Map decisions for quick lookup
+            decision_map = {
+                (d.file_name, d.degree, d.major, course.course_name): {
+                    "should_be_category": course.should_be_category,
+                    "credits_earned": course.credits_earned,
+                    "is_passed": course.is_passed
+                }
+                for d in user_decisions for course in d.courses
+            }
+            print(decision_map)
+
+            for degree in data_dict["degrees"]:
+                for course in degree["courses"]:
+                    decision_key = (file_name, degree["degree"], degree["major"], course["course_name"])
+                    if decision_key in decision_map:
+                        user_decision = decision_map[decision_key]
+                        if user_decision["should_be_category"] is not None:
+                            course["should_be_category"] = user_decision["should_be_category"]
+                        if user_decision["credits_earned"] is not None:
+                            course["credits_earned"] = user_decision["credits_earned"]
+                        if user_decision["is_passed"] is not None:
+                            course["is_passed"] = user_decision["is_passed"]
+            
+            print(f"User decisions applied successfully for {file_name}. Continue processing...")
+
+        # Clean up state
+        if file_name in processing_lock:
+            del processing_lock[file_name]
+        if file_name in flagged_courses_store:
+            del flagged_courses_store[file_name]
+
+    else:
+        # If no flagged courses, notify frontend to close WebSocket
+        print(f"No flagged courses for {file_name}. Notifying frontend to close WebSocket and continue processing.")
+        
+        from main import notify_no_flagged_courses
+        asyncio.create_task(notify_no_flagged_courses(file_name))
+
+
+    # Iterate through each degree and process its courses with user decisions if available
+    for degree in data_dict.get("degrees", []):
+        # Process courses inside the degree
+        for course in degree["courses"]:        
             # Calculate adjusted credits (if is_passed is True, keep credits; otherwise, set to 0)
             course["adjusted_credits_earned"] = course["credits_earned"] if course["is_passed"] else 0
 
@@ -217,9 +469,6 @@ def structure_data(data_dict: dict) -> dict:
                 course.get("grade")
             )
 
-    # Preserve warnings in the final data_dict if needed
-    data_dict["categorization_warnings"] = warnings if warnings else None
-
     print("Structured data:", json.dumps(data_dict, indent=4))
 
     # Save the JSON obejct to a file
@@ -233,7 +482,6 @@ def structure_data(data_dict: dict) -> dict:
         "status": "success",
         "message": "Data structured successfully.",
         "data": data_dict,
-        "warnings": warnings if warnings else None
     }
 
 
@@ -275,7 +523,7 @@ def save_to_database(data_dict: dict, database_file: str) -> dict:
 
 
 # Full data pipeline
-def process_file(file_path: str, database_file: str) -> dict:
+async def process_file(file_path: str, database_file: str) -> dict:
     """
     Handles the full processing of a file:
     - Extracts data
@@ -288,80 +536,95 @@ def process_file(file_path: str, database_file: str) -> dict:
     Returns:
         dict: A response containing the status, message, and any error details.
     """
-    try:
-        # Extract data 
-        print(f"📄 Extracting data from: {file_path}...")
-        extraction_result = extract_data(file_path)
-        if extraction_result["status"] == "error":
-            return extraction_result  # Pass error response directly to `upload_files()`
-        
-        extracted_dict = extraction_result["data"]
-        if not extracted_dict:
+    async with global_lock:
+        # Determine the file type
+        file_extension = os.path.splitext(file_path)[-1].lower()
+        if file_extension not in ALLOWED_EXTENSIONS:
             return {
                 "status": "error",
-                "message": "Extracted data is empty. Please check the input file.",
-                "details": "Possible reasons: File contains no readable text or OCR failed.",
-                "file": file_path
-            }
-        
-        # Validate the data
-        print("🔍 Validating extracted data...")
-        validation_result = validate_data(extracted_dict)
-        if validation_result["status"] == "error":
-            return validation_result  # Return validation error directly
-
-        validated_dict = validation_result.get("data", {})
-        if not validated_dict:
-            return {
-                "status": "error",
-                "message": "Validation returned empty data.",
-                "details": "There might be issues with OCR text extraction or AI-based validation.",
+                "message": f"Unsupported file format: {file_extension}",
+                "details": "Only PDF, JPG, JPEG, PNG, and CSV files are supported.",
                 "file": file_path
             }
 
-        # Structure the data
-        print("🔧 Structuring validated data...")
-        structured_result = structure_data(validated_dict)
-        if structured_result["status"] == "error":
-            return structured_result
+        extracted_dict = None # Initialize extracted data dictionary
 
-        structured_dict = structured_result["data"]
-        if not structured_dict:
+        try:
+            # Extract data 
+            print(f"📄 Extracting data from: {file_path}...")
+            extraction_function = load_data if file_extension == ".csv" else extract_data
+
+            extraction_result = extraction_function(file_path)
+            if extraction_result["status"] == "error":
+                return extraction_result  # Pass error response directly
+
+            extracted_dict = extraction_result.get("data", {})
+            if not extracted_dict:
+                return {
+                    "status": "error",
+                    "message": "Extracted data is empty. Please check the input file.",
+                    "details": "Possible reasons: File contains no readable text or OCR failed.",
+                    "file": file_path
+                }
+            
+            # Validate the data
+            print("🔍 Validating extracted data...")
+            validation_result = validate_data(extracted_dict)
+            if validation_result["status"] == "error":
+                return validation_result  # Return validation error directly
+
+            validated_dict = validation_result.get("data", {})
+            if not validated_dict:
+                return {
+                    "status": "error",
+                    "message": "Validation returned empty data.",
+                    "details": "There might be issues with OCR text extraction or AI-based validation.",
+                    "file": file_path
+                }
+
+            # Structure the data
+            print("🔧 Structuring validated data...")
+            structured_result = await structure_data(validated_dict)
+            if structured_result["status"] == "error":
+                return structured_result
+
+            structured_dict = structured_result.get("data", {})
+            if not structured_dict:
+                return {
+                    "status": "error",
+                    "message": "Structured data is empty after processing.",
+                    "details": "Possible reasons: Data extraction issues or AI processing failure.",
+                    "file": file_path
+                }
+
+            # Save the data to the database
+            print("💾 Saving structured data to the database...")
+            saved_result = save_to_database(structured_dict, database_file)
+            if saved_result["status"] == "error":
+                return saved_result
+
+            print("✅ File processed successfully! Deleting files...")
+
+            # Delete files after processing
+            file_prefix = Path(file_path).stem
+            output_folder = Path(OUTPUT_FOLDER)
+            for file in output_folder.iterdir():
+                if file.is_file() and file.name.startswith(file_prefix):
+                    file.unlink()  # Deletes the file
+
             return {
-                "status": "error",
-                "message": "Structured data is empty after processing.",
-                "details": "Possible reasons: Data extraction issues or AI processing failure.",
+                "status": "success", 
+                "message": "File processed and saved to the database successfully.", 
                 "file": file_path
             }
 
-        # Save the data to the database
-        print("💾 Saving structured data to the database...")
-        saved_result = save_to_database(structured_dict, database_file)
-        if saved_result["status"] == "error":
-            return saved_result
-
-        print("✅ File processed successfully! Deleting files...")
-
-        # Delete files after processing
-        file_prefix = Path(file_path).stem
-        output_folder = Path(OUTPUT_FOLDER)
-        for file in output_folder.iterdir():
-            if file.is_file() and file.name.startswith(file_prefix):
-                file.unlink()  # Deletes the file
-
-        return {
-            "status": "success", 
-            "message": "File processed and saved to the database successfully.", 
-            "file": file_path
-        }
-
-    except Exception as e:
-        error_message = f"Unexpected error processing file: {file_path}: {str(e)}"
-        print(error_message)
-        print(traceback.format_exc())  # Print full error traceback for debugging
-        return {
-            "status": "error",
-            "message": error_message,
-            "details": traceback.format_exc(),
-            "file": file_path
-        }
+        except Exception as e:
+            error_message = f"Unexpected error processing file: {file_path}: {str(e)}"
+            print(error_message)
+            print(traceback.format_exc())  # Print full error traceback for debugging
+            return {
+                "status": "error",
+                "message": error_message,
+                "details": traceback.format_exc(),
+                "file": file_path
+            }

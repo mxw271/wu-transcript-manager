@@ -13,7 +13,7 @@ from utils import get_valid_value
 
 
 # Set a randomness level for OpenAI
-TEMPERATURE = 0.3 # Lower value for more deterministic, precise, and consistent
+TEMPERATURE = 0.2 # Lower value for more deterministic, precise, and consistent
 
 
 # Define validation regex patterns
@@ -30,8 +30,7 @@ PATTERNS = {
     "overall_gpa": re.compile(r"^\d{1,2}(\.\d{1,4})?$|^$"),  # Allows decimals, can be empty
     "course_name": re.compile(r"^[A-Za-z0-9\s\-\&\.,\'’\/\(\):]+$"),
     "credits_earned": re.compile(r"^\d{1,2}(\.\d{1,4})?$|^$"),  # Can be empty
-    "grade": re.compile(r"^(A\+?|A\-?|B\+?|B\-?|C\+?|C\-?|D\+?|D\-?|F|[A-Z]{1,3}|[0-9]{1,3}(\.\d{1,4})?)$|^$"),  # Supports letter and numeric grades, can be empty
-    "is_passed": re.compile(r"^(True|False|true|false)$")  # Boolean values
+    "grade": re.compile(r"^(A\+?|A\-?|B\+?|B\-?|C\+?|C\-?|D\+?|D\-?|F|[A-Z]{1,3}|[0-9]{1,3}(\.\d{1,4})?)$|^$")  # Supports letter and numeric grades, can be empty
 }
 
 
@@ -108,7 +107,7 @@ def validate_name_openai(first_name, middle_name, last_name, temperature: float 
 
     Check if each name is a valid human name. Ensure proper capitalization, detect OCR errors, and suggest corrections if necessary.
     **Rules:**
-    - Return only valid JSON, with no extra text, comments, or markdown formatting.
+    - Return only JSON, with no extra text, comments, or markdown formatting.
     - No explanations, just the JSON output.
     - If a field is empty, leave it as an empty string.
 
@@ -164,7 +163,7 @@ def validate_academic_info_openai(institution_name, degree, major, minor, temper
 
     Check if the institution exists and whether the degree, major, and minor are commonly offered.
     **Rules:**
-    - Return only valid JSON, with no extra text, comments, or markdown formatting.
+    - Return only JSON, with no extra text, comments, or markdown formatting.
     - No explanations, just the JSON output.
     - If a field is empty, leave it as an empty string.
     
@@ -217,7 +216,7 @@ def validate_awarded_date_openai(awarded_date, temperature: float = TEMPERATURE)
     - Awarded Date: {awarded_date}
 
     **Rules:**
-    - Return only valid JSON, with no extra text, comments, or markdown formatting.
+    - Return only JSON, with no extra text, comments, or markdown formatting.
     - No explanations, just the JSON output.
     - If a field is empty, leave it as an empty string.
     
@@ -269,7 +268,7 @@ def validate_academic_performance_openai(overall_credits_earned, overall_gpa, te
 
     Check if the credits and GPA are within a reasonable range for a degree.
     **Rules:**
-    - Return only valid JSON, with no extra text, comments, or markdown formatting.
+    - Return only JSON, with no extra text, comments, or markdown formatting.
     - No explanations, just the JSON output.
     - If a field is empty, return `None` instead of `0.0`.
     
@@ -324,9 +323,10 @@ def validate_coursework_openai(course_name, credits_earned, grade, temperature: 
     Check if the course is commonly offered, if the credits make sense, and whether the grade is a valid academic grade.
     
     **Rules:**
-    - Return only valid JSON, with no extra text, comments, or markdown formatting.
+    - Return only JSON, with no extra text, comments, or markdown formatting.
     - No explanations, just the JSON output.
     - If a field is empty, leave it as an empty value.
+    - Capitalize only important words. Keep minor words lowercase (e.g., "of", "in", "the") unless they start a sentence. Leave all abbreviations capitalized.
     - Check for statistical anomalies in credits earned, but **DO NOT modify credits that already match standard academic formats (e.g., 3.0, 7.5, 15.0, 30.0, etc.).**
     - If credits earned seem unusual but match common values in the transcript, **do not change them**.
     - If a grade is a numeric grade, do not convert it to a letter grade, and vice versa. The grade should be returned as a string.
@@ -431,8 +431,8 @@ def openai_based_validation(data_dict) -> dict:
                 get_valid_value(degree.get("overall_gpa"), None)
             ) 
 
-            corrected_degree["overall_credits_earned"] = corrected_performance.get("overall_credits_earned", get_valid_value(degree.get("overall_credits_earned"), None))
-            corrected_degree["overall_gpa"] = corrected_performance.get("overall_gpa", get_valid_value(degree.get("overall_gpa"), None))
+            corrected_degree["overall_credits_earned"] = get_valid_value(corrected_performance.get("overall_credits_earned"), get_valid_value(degree.get("overall_credits_earned"), None))
+            corrected_degree["overall_gpa"] = get_valid_value(corrected_performance.get("overall_gpa"), get_valid_value(degree.get("overall_gpa"), None))
 
             # Validate Coursework (Course Name, Credits Earned, Grade)
             corrected_courses = []
@@ -447,8 +447,7 @@ def openai_based_validation(data_dict) -> dict:
                 corrected_courses.append({
                     "course_name": corrected_course.get("course_name", course.get("course_name", "")),
                     "credits_earned": corrected_course.get("credits_earned", course.get("credits_earned")),
-                    "grade": corrected_course.get("grade", course.get("grade", "")),
-                    "is_passed": course.get("is_passed", False)
+                    "grade": corrected_course.get("grade", course.get("grade", ""))
                 })
 
             corrected_degree["courses"] = corrected_courses
