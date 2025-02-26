@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchCourseCategories, uploadFile, getFlaggedCourses, submitFlaggedDecisions, setupWebSocket } from '../apiServices';
 import FlaggedCourses from '../components/FlaggedCourses';
 import BackToHomeButton from '../components/BackToHomeButton';
@@ -151,7 +151,7 @@ const UploadPage = () => {
     });
     
     console.log(`Opening WebSocket for ${fileName}`);
-    const ws = setupWebSocket(fileName, wsRef, currentFileRef, flaggedCoursesReceived, fetchFlaggedCourses, moveToNextFile, setProcessedFiles, handleWebSocketError, setIsProcessing);
+    const ws = setupWebSocket(fileName, wsRef, currentFileRef, flaggedCoursesReceived, fetchFlaggedCourses, moveToNextFile, setProcessedFiles, cleanupWebSocket, handleWebSocketError, setIsProcessing);
     activeWebSockets.set(fileName, ws);
   };
 
@@ -167,7 +167,12 @@ const UploadPage = () => {
       return setupWebSocketConnection(fileName);
     }
 
-    setProcessedFiles(prev => prev.some(file => file.name === fileName) ? prev : [...prev, { name: fileName, result: { status: "error", message: "WebSocket error. File processing failed." } }]);
+    setProcessedFiles(prev => {
+      if (!prev.some(file => file.name === fileName)) {
+        return [...prev, { name: fileName, result: { status: "error", message: "WebSocket error. File processing failed." } }]
+      }
+      return prev;
+    });
     moveToNextFile();
   };
 
@@ -205,7 +210,7 @@ const UploadPage = () => {
           if (!prev.some(file => file.name === fileName)) {
             return [...prev, { name: fileName, result: { status: "error", message: "no flagged courses" } }];
           }
-          return prev;
+          return prev
         });
         setIsProcessing(false);
         moveToNextFile();

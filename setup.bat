@@ -211,8 +211,8 @@ echo Virtual environment activated.
 
 :: Install dependencies
 echo Installing backend dependencies...
+"!PYTHON_PATH!" -m pip install --upgrade pip
 if exist "requirements.txt" (
-    "!PYTHON_PATH!" -m pip install --upgrade pip
     pip install -r requirements.txt
 ) else (
     echo No requirements.txt found. Skipping dependency installation.

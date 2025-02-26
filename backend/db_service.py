@@ -6,6 +6,7 @@ import os
 import pandas as pd
 import sqlite3
 from sqlite3 import Connection
+import traceback
 from db_create_tables import initialize_database
 
 

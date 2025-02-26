@@ -25,7 +25,10 @@ export const fetchCourseCategories = async () => {
  * @param {Function} moveToNextFile - Callback to move to the next file
  * @returns {WebSocket} - The WebSocket connection instance
  */
-export const setupWebSocket = (fileName, wsRef, currentFileRef, flaggedCoursesReceived, onFlaggedCoursesReady, moveToNextFile, setProcessedFiles, handleWebSocketError, setIsProcessing) => {
+export const setupWebSocket = (
+  fileName, wsRef, currentFileRef, flaggedCoursesReceived, onFlaggedCoursesReady, moveToNextFile, 
+  setProcessedFiles, cleanupWebSocket, handleWebSocketError, setIsProcessing
+) => {
   if (!fileName) return null;
 
   // Prevent multiple WebSocket connections for the same file
@@ -54,7 +57,10 @@ export const setupWebSocket = (fileName, wsRef, currentFileRef, flaggedCoursesRe
       return;
     }
     console.warn(`Reconnecting WebSocket for ${fileName}... Attempt ${++reconnectAttempts}`);
-    wsRef.current = setupWebSocket(fileName, wsRef, currentFileRef, flaggedCoursesReceived, onFlaggedCoursesReady, moveToNextFile, setProcessedFiles, handleWebSocketError, setIsProcessing); 
+    wsRef.current = setupWebSocket(
+      fileName, wsRef, currentFileRef, flaggedCoursesReceived, onFlaggedCoursesReady, moveToNextFile, 
+      setProcessedFiles, cleanupWebSocket, handleWebSocketError, setIsProcessing
+    ); 
   };
 
   // Function to mark file as failed if WebSocket issues persist
@@ -104,8 +110,8 @@ export const setupWebSocket = (fileName, wsRef, currentFileRef, flaggedCoursesRe
           return prev;
         });
         
-        cleanupWebSocket(wsRef);
         setIsProcessing(false); // Set isProcessing to false to allow the next file to be processed
+        cleanupWebSocket();
         moveToNextFile(); // Move to the next file
       }
     } catch (error) {
@@ -123,15 +129,8 @@ export const setupWebSocket = (fileName, wsRef, currentFileRef, flaggedCoursesRe
       setTimeout(reconnectWebSocket, RECONNECT_DELAY);
     } else {
       console.error(`Max WebSocket reconnect attempts reached for ${fileName}. Marking file as failed.`);
-
-      // Mark the file as failed
-      setProcessedFiles(prev => {
-          if (!prev.some(file => file.name === fileName)) {
-              return [...prev, { name: fileName, result: { status: "error", message: "WebSocket error. File processing failed." } }];
-          }
-          return prev;
-      });
-
+      markFileAsFailed(fileName);
+      cleanupWebSocket();
       moveToNextFile();
     }
   };
@@ -154,15 +153,10 @@ export const setupWebSocket = (fileName, wsRef, currentFileRef, flaggedCoursesRe
       if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++;
         setTimeout(reconnectWebSocket, RECONNECT_DELAY);
-      } else {
-        // If reconnection fails after retries, mark the file as failed
+      } else { 
         console.error(`Max WebSocket reconnect attempts reached for ${fileName}. Marking file as failed.`);
-        setProcessedFiles(prev => {
-          if (!prev.some(file => file.name === fileName)) {
-            return [...prev, { name: fileName, result: { status: "error", message: "WebSocket reconnection failed." } }];
-          }
-          return prev;
-        });
+        markFileAsFailed(fileName);
+        cleanupWebSocket();
         moveToNextFile();
       }
     } else {
@@ -171,16 +165,6 @@ export const setupWebSocket = (fileName, wsRef, currentFileRef, flaggedCoursesRe
   };
 
   return ws;
-};
-
-
-// Function to cleanup WebSocket
-const cleanupWebSocket = (wsRef) => {
-  if (wsRef.current) {
-    wsRef.current.onclose = null;
-    wsRef.current.close();
-    wsRef.current = null;
-  }
 };
 
 

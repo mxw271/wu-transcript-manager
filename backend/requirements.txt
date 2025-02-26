@@ -67,7 +67,6 @@ typing_extensions==4.12.2
 tzdata==2025.1
 urllib3==2.3.0
 uvicorn==0.34.0
-uvloop==0.21.0
 watchfiles==1.0.4
 websockets==15.0
 wheel==0.45.1

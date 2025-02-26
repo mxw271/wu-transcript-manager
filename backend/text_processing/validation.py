@@ -381,6 +381,7 @@ def openai_based_validation(data_dict) -> dict:
     Returns:
         dict: A dictionary with validated/corrected data.
     """
+    print("Validating data using OpenAI...")
     corrected_data = {"student": {}, "degrees": []}
     
     try:
