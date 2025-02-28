@@ -9,6 +9,7 @@ input[type="file"] {
   border: none; 
   border-radius: 5px; 
   cursor: pointer; 
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); 
   transition: background-color 0.3s ease, transform 0.2s ease; 
 }
 
@@ -16,6 +17,7 @@ input[type="file"] {
 input[type="file"]:hover {
   background-color: #669fdc; 
   transform: scale(1.05); 
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2); 
 }
 
 /* Active State */
@@ -24,8 +26,11 @@ input[type="file"]:active {
   transform: scale(0.95); 
 }
 
-input[type="file"]:hover {
-  border-color: #2e7ed3;
+/* Disabled State*/
+input[type="file"]:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* Status */
@@ -69,4 +74,31 @@ input[type="file"]:hover {
   font-size: 10px;
   border-radius: 5px;
   transition: width 0.3s ease-in-out;
+}
+
+.cancel-btn {
+  padding: 15px 20px;
+  background-color: #dc3545;
+  font-size: 1.2rem;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  width: fit-content;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); 
+  transition: background-color 0.3s ease;
+}
+
+/* Hover effect */
+.cancel-btn:hover {
+  background-color: #d7220a;
+  transform: scale(1.05); 
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2); 
+}
+
+/* Disabled State*/
+.cancel-btn:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+  transform: none;
 }

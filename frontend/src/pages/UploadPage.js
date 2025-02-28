@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchCourseCategories, uploadFile, getFlaggedCourses, submitFlaggedDecisions, setupWebSocket } from '../apiServices';
+import { Buffer } from 'buffer';
+import { fetchCourseCategories, uploadFile, getFlaggedCourses, submitUserDecisions } from '../apiServices';
 import FlaggedCourses from '../components/FlaggedCourses';
 import BackToHomeButton from '../components/BackToHomeButton';
 import '../styles/UploadPage.css';
+
+// Set the base URL for WebSocket connections. It runs on port 8000 by default.
+const WS_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:8000';
 
 const UploadPage = () => {
   const [uploadStatus, setUploadStatus] = useState(''); // Track upload status messages
@@ -14,11 +18,15 @@ const UploadPage = () => {
   const [currentFile, setCurrentFile] = useState(null);
   const currentFileRef = useRef(null); // Reference to track the current file immediately
   const [pendingFiles, setPendingFiles] = useState([]); // Queue for files to be processed
+  const pendingFilesRef = useRef(pendingFiles);
   const [invalidFiles, setInvalidFiles] = useState([]); // List for invalid files
-  const wsRef = useRef(null); // Reference to the WebSocket connection
   const [isProcessing, setIsProcessing] = useState(false);
+  const isProcessingRef = useRef(isProcessing);
+  const wsRef = useRef(null); // Reference to the WebSocket connection
+  const activeWebSockets = useRef(new Map()); // Track active WebSocket connections
+  const reconnectAttemptsRef = useRef({}); // Store reconnect attempts 
+  const webSocketClosedByBackendRef = useRef(false); // Track backend-initiated closure
   let flaggedCoursesReceived = false; // Global variable to track whether flagged courses were received
-  const activeWebSockets = new Map(); // Track active WebSocket connections
 
   // File upload restrictions
   const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit per file
@@ -41,39 +49,89 @@ const UploadPage = () => {
     memoizedCategories.then(setCourseCategories);
   }, [memoizedCategories]);
 
-  // Process pending files if any exist
-  useEffect(() => {
-    if (pendingFiles.length > 0 && !currentFileRef.current) {  // Prevent unintended WebSocket reconnections
-      setUploadStatus('Starting file processing...');
-      processNextFile();
-    }
-  }, [pendingFiles]);
-
   // Synchronize currentFileRef with currentFile state
   useEffect(() => {
     currentFileRef.current = currentFile;
   }, [currentFile]);
 
-  // Function to properly close the WebSocket connection and reset the weRef
-  const cleanupWebSocket = () => {
-    if (wsRef.current) {
-      console.log(`Cleaning up WebSocket for ${wsRef.current.fileName}`);
-      try {
-        wsRef.current.onclose = null; // Remove the onclose handler to prevent reconnection
-        wsRef.current.close(); // Close the WebSocket connection
-      } catch (error) {
-        console.warn("Error while closing WebSocket:", error);
+  // Synchronize pendingFilesRef with pendingFiles state
+  useEffect(() => {
+    pendingFilesRef.current = pendingFiles;
+  }, [pendingFiles]);
+
+  // Synchronize isProcessingRef with isProcessing state
+  useEffect(() => {
+    isProcessingRef.current = isProcessing; 
+  }, [isProcessing]);
+
+ // Process pending files if any exist
+  useEffect(() => {
+    if (pendingFiles.length > 0 && !isProcessing && !currentFileRef.current) {  // Prevent unintended WebSocket reconnections
+      processNextFile(); 
+    }
+  }, [pendingFiles, isProcessing, currentFile]);
+
+  // Mark the status for a file with given message
+  const markFileStatus = (fileName, status, message) => {
+    setProcessedFiles(prev => {
+      const processedFileNames = new Set(prev.map(file => file.name));
+      if (!processedFileNames.has(fileName)) {
+        return [...prev, { name: fileName, result: { status, message } }];
       }
+      return prev;
+    });
+  };
+
+  // Move to the next file in the queue
+  const moveToNextFile = () => {
+    cleanupWebSocket(currentFileRef.current); // Clean up the WebSocket connection
+    webSocketClosedByBackendRef.current = false; // Reset the flag
+
+    setPendingFiles(prev => {
+      const updatedFiles = prev.slice(1); // Remove the first file
+      if (updatedFiles.length === 0) {
+        setUploadStatus("All files processed."); // All files completed
+        setCurrentFile(null);
+      } else {
+        setCurrentFile(updatedFiles[0].name); // Set the next file as the current file
+        setTimeout(() => processNextFile(), 500); // Allow state updates before processing next file
+      }
+      return updatedFiles;
+    });
+
+    setIsProcessing(false); // Mark processing as completed
+  };
+
+  // Properly close the WebSocket connection and reset the weRef
+  const cleanupWebSocket = (fileName) => {
+    if (wsRef.current && !webSocketClosedByBackendRef.current) {
+      console.log(`Cleaning up WebSocket for ${wsRef.current.fileName}`);
+      
+      // Only close the WebSocket if it's still open
+      if (wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.onclose = null;  // Prevent duplicate closures
+        setTimeout(() => wsRef.current.close(), 3000);  // Delay closure slightly
+        console.log(`WebSocket closed for ${fileName}`);
+      }
+
       wsRef.current = null; // Reset the WebSocket reference
+      activeWebSockets.current.delete(fileName); // Remove all tracked WebSockets
     }
   };
 
   // Handles file selection and adds files to the processing queue
   const handleFileUpload = (event) => {
+    // Reset states before handling new files
+    cleanupWebSocket(currentFileRef.current);
     setProcessedFiles([]);
     setCurrentFile(null);
     setPendingFiles([]);
     setInvalidFiles([]);
+    setUploadStatus('');
+    setFlaggedCourses([]);
+    setUserDecisions({});
+    setIsProcessing(false);
+    
     setUploadStatus('Uploading...');
 
     const files = Array.from(event.target.files);
@@ -106,84 +164,211 @@ const UploadPage = () => {
 
   // Processes the next file in the queue sequentially
   const processNextFile = async () => {
-    if (pendingFiles.length === 0 || isProcessing) return;
+    if (pendingFilesRef.current.length === 0 || isProcessingRef.current) return;
 
     setIsProcessing(true); // Mark processing as started
-    const nextFile = pendingFiles[0]; // Get the first file in the queue
+    const nextFile = pendingFilesRef.current[0]; // Get the first file in the queue
     setCurrentFile(nextFile.name);
     setUploadStatus(`Processing ${nextFile.name}...`);
 
     if (processedFiles.some(file => file.name === nextFile.name)) {
       console.log(`Skipping already processed file: ${nextFile.name}`);
-      return moveToNextFile();
+      moveToNextFile();
+      return;
     }
 
-    // Open WebSocket connection for real-time updates only for unprocessed files
-    setupWebSocketConnection(nextFile.name);
-      
-    // Upload the file to the backend
-    const response = await uploadFile(nextFile, percent => setProgress(prev => ({ ...prev, [nextFile.name]: percent})));
-      
-    // Store processed file result
-    setProcessedFiles(prev => {
-      if (!prev.some(file => file.name === nextFile.name)) {
-          return [...prev, { name: nextFile.name, result: response }];
-      }
-      return prev;
-    });
-    setIsProcessing(false);
+    try {
+      // Open WebSocket connection for real-time updates only for unprocessed files
+      await setupWebSocketConnection(nextFile.name);
+    } catch (error) {
+      setUploadStatus(`Error setting up WebSocket for ${nextFile.name}.`);
+      markFileStatus(nextFile.name, "error", "WebSocket setup failed.");
+      moveToNextFile();
+    }
   };
 
   // Sets up the WebSocket connection for a given file
-  const setupWebSocketConnection = (fileName) => {
-    flaggedCoursesReceived = false; // Reset tracking when starting a new WebSocket
+  const setupWebSocketConnection = async (fileName) => {
+    if (!fileName) return;
 
     // Ensure file is unprocessed before setting up a WebSocket connection
-    if (processedFiles.some(file => file.name === fileName)) return;
+    if (isProcessingRef.current || processedFiles.some(file => file.name === fileName)) return;
 
-    // Close any existing WebSockets for files that are not currently being processed
-    activeWebSockets.forEach((ws, key) => {
-      if (key !== fileName) {
-        console.log(`Closing extra WebSocket connection for ${key}`);
-        ws.close();
-        activeWebSockets.delete(key);
-      }
-    });
-    
-    console.log(`Opening WebSocket for ${fileName}`);
-    const ws = setupWebSocket(fileName, wsRef, currentFileRef, flaggedCoursesReceived, fetchFlaggedCourses, moveToNextFile, setProcessedFiles, cleanupWebSocket, handleWebSocketError, setIsProcessing);
-    activeWebSockets.set(fileName, ws);
-  };
-
-  // Handles WebSocket errors and reconnection logic
-  const handleWebSocketError = (fileName, event) => {
-    console.warn(`WebSocket error or disconnection for ${fileName}: ${event.reason}`);
-
-    // If flagged courses are already received, continue handling user decisions
-    if (flaggedCourses.length > 0) return;
-
-    // If WebSocket disconnects before flagged courses are received, attempt to reconnect
-    if (event.reason === "keepalive ping timeout" || event.code === 1006) {
-      return setupWebSocketConnection(fileName);
+    // Prevent multiple active WebSockets for the same file
+    if (activeWebSockets.current.has(fileName)) {
+      console.warn(`WebSocket already active for ${fileName}. Skipping duplicate connection.`);
+      return;
     }
 
-    setProcessedFiles(prev => {
-      if (!prev.some(file => file.name === fileName)) {
-        return [...prev, { name: fileName, result: { status: "error", message: "WebSocket error. File processing failed." } }]
+    reconnectAttemptsRef.current[fileName] = 0; // Reset reconnect attempts when starting a new file
+    flaggedCoursesReceived = false; // Reset tracking when starting a new WebSocket
+    
+    console.log(`Opening WebSocket for ${fileName}`);
+    const ws = setupWebSocket(fileName);
+    if (ws) activeWebSockets.current.set(fileName, ws);
+  };
+
+  // Sets up the WebSocket connection for the file being processed
+  const setupWebSocket = (fileName) => {
+    console.log(`Setting up WebSocket for ${fileName}`);
+    if (!fileName) return null;
+  
+    // Prevent reuse of closed WebSocket connections
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+      console.warn(`WebSocket already exists for ${fileName}. Skipping duplicate connection.`);
+      return wsRef.current;
+    }
+  
+    const encodedFileName = Buffer.from(fileName).toString("base64");
+    let ws = new WebSocket(`${WS_URL}/ws/flagged_courses/${encodedFileName}`);
+    wsRef.current = ws; // Assign the WebSocket instance to wsRef.current
+  
+    const MAX_RECONNECT_ATTEMPTS = 3; // Limit retries to prevent infinite loops
+    const RECONNECT_DELAY = 3000; // Wait 3 seconds before reconnecting
+    let keepAliveInterval;
+  
+    // Funtion to attempt WebSocket Reconnection on timeout
+    const reconnectWebSocket = () => {
+      if (reconnectAttemptsRef.current[fileName] >= MAX_RECONNECT_ATTEMPTS) {
+        console.error(`Max WebSocket reconnect attempts reached for ${fileName}. Marking file as failed.`);
+        if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+          cleanupWebSocket(fileName);
+        }
+        markFileStatus(fileName, "error", "WebSocket reconnection failed.");
+        moveToNextFile();
+        return;
       }
-      return prev;
-    });
-    moveToNextFile();
+
+      console.log(`Reconnecting WebSocket for ${fileName}... Attempt ${reconnectAttemptsRef.current[fileName] + 1}`);
+      reconnectAttemptsRef.current[fileName]++;
+      setTimeout(() => setupWebSocket(fileName), RECONNECT_DELAY); // Reconnect after delay
+    };
+  
+    ws.onopen = () => {
+      // Start keepalive ping every 30 seconds
+      keepAliveInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "ping" }));
+          console.log("Keepalive ping sent.");
+        }
+      }, 30000);
+    };
+  
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+  
+        if (data.status === "connected") {
+          console.log(`WebSocket connection confirmed for ${data.file_name}`);
+          // Start processing the file only after the WebSocket connection is confirmed
+          processAfterWebSocketConfirmed(fileName);
+
+        } else if (data.status === "ready" && fileName === currentFileRef.current) {
+          console.log(`Flagged courses are ready for ${data.file_name}`);
+          fetchFlaggedCourses(data.file_name);
+          flaggedCoursesReceived = true; // Track flagged courses to prevent unnecessary reconnection attempts
+        
+        } else if (data.status === "intentional_closure") {
+          console.log(`Backend intentionally closed WebSocket for ${fileName}. No further reconnection needed.`);
+          webSocketClosedByBackendRef.current = true; 
+          if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+            wsRef.current.onclose = null; // Prevent duplicate closures
+            setTimeout(() => wsRef.current.close(), 3000); // 3-second delay
+          }
+  
+        } else if (data.status === "no_flagged_courses" && fileName === currentFileRef.current) {
+          console.log(`No flagged courses for ${data.file_name}. Backend closed WebSocket and no further reconnection needed.`);
+          webSocketClosedByBackendRef.current = true; 
+          if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+            wsRef.current.onclose = null; // Prevent duplicate closures
+            setTimeout(() => wsRef.current.close(), 3000); // 3-second delay
+          }
+          markFileStatus(fileName, "success", "No flagged courses found. File processing completed.");
+          moveToNextFile(); 
+        }
+      } catch (error) {
+        console.error("WebSocket JSON parse error:", error);
+      }
+    };
+  
+    ws.onerror = (error) => {
+      console.error(`WebSocket error for ${fileName}:`, error);
+      
+      // If the backend intentionally closed the WebSocket, do not reconnection
+      if (webSocketClosedByBackendRef.current) {
+        console.log(`WebSocket error occured after intentional closure for ${fileName}. No need to reconnect.`);
+        return;
+      }
+  
+      // If flagged courses were already received, continue handling user decisions
+      if (flaggedCoursesReceived) {
+        console.log("WebSocket error, but flagged courses already received. Ignoring error.");
+        return;
+      }
+  
+      // If WebSocket disconnects before flagged courses are received, attempt reconnection
+      reconnectWebSocket();
+    };
+  
+    ws.onclose = (event) => {
+      console.warn(`WebSocket closed for ${fileName}, reason: ${event.reason}`);
+      
+      clearInterval(keepAliveInterval); // Stop keepalive pings on close
+  
+      // If the backend intentionally closed the WebSocket, do not reconnection
+      if (webSocketClosedByBackendRef.current) {
+        console.log(`WebSocket closed intentionally by backend for ${fileName}. No need to reconnect.`);
+        wsRef.current = null;
+        activeWebSockets.current.delete(fileName);
+        return;
+      }
+  
+      // If flagged courses are already received, continue handling user decisions
+      if (flaggedCoursesReceived) {
+        console.log("WebSocket disconnected, but flagged courses already received. Continuing...");
+        wsRef.current = null;
+        activeWebSockets.current.delete(fileName);
+        return;
+      }
+
+      // If WebSocket disconnects before flagged courses are received, attempt reconnection
+      reconnectWebSocket();
+    };
+  
+    return ws;
+  };
+
+  // Process the file after the WebSocket connection is established
+  const processAfterWebSocketConfirmed = async (fileName) => {
+    if (fileName !== currentFileRef.current) return;
+
+    const nextFile = pendingFilesRef.current[0]; // Get the first file in the queue
+    setUploadStatus(`Processing ${nextFile.name}...`);
+    
+    try {
+      // Upload the file to the backend
+      console.log(`Sending ${nextFile.name} to the backend...`);
+      await uploadFile(nextFile, percent => setProgress(prev => ({ ...prev, [nextFile.name]: percent })));
+    } catch (error) {
+      const errorMessage = `Error processing ${nextFile.name}.`;
+      setUploadStatus(`Error processing ${nextFile.name}.`);
+      if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+        cleanupWebSocket(nextFile.name);
+      }
+      markFileStatus(nextFile.name, "error", errorMessage || "File processing failed.");
+      moveToNextFile();
+    }
   };
 
   // Fetches flagged courses for the current file once they are ready
-  const fetchFlaggedCourses = async (fileName) => {
-    if (fileName !== currentFileRef.current) return; // Only fetch for the current file
+  const fetchFlaggedCourses = async (fileName, retryCount = 0) => {
+    if (fileName !== currentFileRef.current || flaggedCoursesReceived) return;  // Only fetch for the current file
     setFlaggedCourses([]);
     setUserDecisions({});
     
     try {
       const response = await getFlaggedCourses(fileName);
+
       if (response.status === "success" && response.flagged_courses.length > 0) {
         setFlaggedCourses(response.flagged_courses);
         flaggedCoursesReceived = true;
@@ -203,30 +388,31 @@ const UploadPage = () => {
         });
         setUserDecisions(initialDecisions);
         setUploadStatus(`Please review flagged courses for ${fileName}.`);
+
       } else {
-        console.log(`No flagged courses detected for ${fileName}. Marking as successfully processed.`);
-        setUploadStatus(`No flagged courses detected for ${fileName}.`);
-        setProcessedFiles(prev => {
-          if (!prev.some(file => file.name === fileName)) {
-            return [...prev, { name: fileName, result: { status: "error", message: "no flagged courses" } }];
+        console.log(`No flagged courses received for ${fileName}. Retrying (${retryCount + 1}/3)...`);
+
+        if (retryCount < 3) {
+          setTimeout(() => fetchFlaggedCourses(fileName, retryCount + 1), 1000);
+        } else {
+          console.error(`No flagged courses detected for ${fileName}. Marking file as failed.`);
+          setUploadStatus(`No flagged courses detected for ${fileName}.`);
+          if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+            cleanupWebSocket(fileName);
           }
-          return prev
-        });
-        setIsProcessing(false);
-        moveToNextFile();
+          markFileStatus(fileName, "error", "No flagged courses received.");
+          moveToNextFile();
+        }
       }
+
+      retryCount++;
     } catch (error) {
       console.error("Error fetching flagged courses:", error);
-      setUploadStatus("Error: Unable to fetch flagged courses.");
-    
-      // Mark the file as processed unsuccessfully
-      setProcessedFiles(prev => {
-        if (!prev.some(file => file.name === fileName)) {
-          return [...prev, { name: fileName, result: { status: "error", message: "Failed to fetch flagged courses." } }];
-        }
-        return prev;
-      });
-      setIsProcessing(false);
+      setUploadStatus(`Error: Unable to fetch flagged courses for ${fileName}`);
+      if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+        cleanupWebSocket(fileName);
+      }
+      markFileStatus(fileName, "error", "Failed to fetch flagged courses.");
       moveToNextFile();
     }
   };
@@ -243,9 +429,10 @@ const UploadPage = () => {
     }));
   };
 
-  // Submits user decisions and moves to the next file
+  // Submits user clicks on the upload box or the "Back to Home" button
   const handleSubmitDecisions = async () => {
     setUploadStatus('Submitting user decisions and processing it...');
+
     if (!currentFileRef.current) {
       alert("Error: No file selected.");
       return;
@@ -272,40 +459,34 @@ const UploadPage = () => {
       return acc;
     }, []);
 
-    const response = await submitFlaggedDecisions(currentFileRef.current, structuredDecisions);
+    try {
+      const response = await submitUserDecisions(currentFileRef.current, structuredDecisions);
 
-    // Close the WebSocket for the current file
-    if (wsRef.current) wsRef.current.close(); 
-
-    if (response.status === "success") {
-      alert("Decisions submitted successfully!");
-
-      // Ensure backend has completed processing before moving to next file
-      setTimeout(() => {
-        if (wsRef.current) {
-          wsRef.current.close();
+      if (response.status === "success") {
+        alert(response.message || "Decisions submitted successfully!");
+        if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+          cleanupWebSocket(currentFileRef.current);
         }
+        markFileStatus(currentFileRef.current, "success", `${response.message} File processing completed.`);
         moveToNextFile();
-      }, 2000); // Small delay to ensure processing completion
-    } else {
-      alert("Error submitting decisions. Please try again.");
-    }
-  };
 
-  // Moves to the next file in the queue
-  const moveToNextFile = () => {
-    cleanupWebSocket(); // Clean up the WebSocket connection
-    setPendingFiles(prev => prev.slice(1));
-    setCurrentFile(null);
-    currentFileRef.current = null;
+      } else {
+        alert(response.message || "Error submitting decisions. Please try again.");
+        if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+          cleanupWebSocket(currentFileRef.current);
+        }
+        markFileStatus(currentFileRef.current, "error", "Failed to fetch flagged courses.");
+        moveToNextFile();
+      }
 
-    // Check if all files are processed
-    if (pendingFiles.length <= 1) {
-      setUploadStatus("All files processed."); // Update status when all files are done
-    } else {
-      setTimeout(() => {
-        processNextFile(); // Allow pendingFiles state to update before calling next process
-      }, 500); // Small delay ensures proper state update
+    } catch (error) {
+      const errorMessage = `Error submitting decisions: ${error.message}`;
+      alert(errorMessage);
+      if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+        cleanupWebSocket(currentFileRef.current);
+      }
+      markFileStatus(currentFileRef.current, "error", "Error submitting decisions.");
+      moveToNextFile();
     }
   };
   
@@ -316,11 +497,13 @@ const UploadPage = () => {
       <p>Maximum size: <strong>5MB</strong></p>
       <p>Max files: <strong>100</strong></p>
       
+      {/* Upload box */}
       <input
         type="file"
         accept=".pdf, .jpg, .jpeg, .png, .csv"
         multiple
         onChange={handleFileUpload}
+        disabled={isProcessing}
       />
       
       {/* Display upload status for any valid files */}
@@ -400,7 +583,7 @@ const UploadPage = () => {
       )}
 
       {/* Return back to home page button */}
-      <BackToHomeButton />
+      <BackToHomeButton disabled={isProcessing}/>      
     </div>
   );
 }

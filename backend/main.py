@@ -59,6 +59,7 @@ websocket_connections: Dict[str, WebSocket] = {}
 flagged_courses_store: Dict[str, List[Dict]] = {}
 user_decisions_store: Dict[str, List[Dict]] = {}
 processing_lock: Dict[str, asyncio.Event] = {} # Lock to pause/resume processing
+websocket_closed_flags: Dict[str, bool] = {}  # Track whether WebSocket has been closed
 
 
 # Return a list of course categories
@@ -67,6 +68,100 @@ def get_course_categories():
     categories_dict = load_course_categories()
     categories_list = list(categories_dict.keys())
     return {"course_categories": categories_list}
+
+
+# Send WebSocket notifications to frontend with stauts
+async def notify_status(file_name: str, status: str):
+    """
+    Notify the frontend with a specific status message.
+    Closes the WebSocket connection if needed.
+    """
+    print(f"🔍 Debug: Attempting to send WebSocket message for {file_name}: {status}")
+
+    ws = websocket_connections.get(file_name) # Get the WebSocket for this file
+    if not ws:
+        print(f"No WebSocket connection found for {file_name}.")
+        return
+
+    try:
+        # Check if the WebSocket is still open
+        if ws.client_state.name != "CONNECTED":
+            print(f"Skipping WebSocket message for {file_name} as the connection is closed.")
+            return
+
+        # Send the status message
+        await ws.send_json({"status": status, "file_name": file_name})
+        print(f"🌐 WebSocket notification sent: {status} for {file_name}")
+        
+        # Close the WebSocket if the status indicates it's no longer needed
+        if status in {"no_flagged_courses", "intentional_closure"}:
+            await asyncio.sleep(1)  # Give the frontend time to handle closure
+            await ws.close()
+            websocket_connections.pop(file_name, None)
+            websocket_closed_flags[file_name] = True
+            print(f"🌐 WebSocket connection closed for {file_name}")
+
+    except Exception as e:
+        print(f"🌐 Error sending WebSocket message for {file_name}: {e}")
+        websocket_connections.pop(file_name, None)
+
+
+# Manage WebSocket connections for flagged courses
+@app.websocket("/ws/flagged_courses/{file_name}")
+async def websocket_flagged_courses(websocket: WebSocket, file_name: str):
+    """
+    WebSocket connection for flagged courses. 
+    Opens before file processing and sends flagged courses when ready.
+    """
+    file_name = decode_file_name(file_name)  # Decode spaces in filename
+    print(f"🌐 WebSocket connection established for {file_name}")
+    
+    await websocket.accept()
+
+    # Store WebSocket connection
+    websocket_connections[file_name] = websocket
+
+    try:
+        # Send initial connection confirmation
+        await websocket.send_json({"status": "connected", "file_name": file_name})
+        
+        # Wait for processing_lock to be created
+        max_retries = 10 
+        retry_delay = 1  # Delay between retries (in seconds)
+        for attempt in range(max_retries):
+            if file_name in processing_lock:
+                break  
+            await asyncio.sleep(retry_delay)  # Wait before retrying
+
+        if file_name not in processing_lock:
+            print(f"🌐 Processing lock not created for {file_name} after {max_retries} attempts. Closing WebSocket.")
+            await websocket.close()
+            return
+
+        # Main WebSocket loop
+        while file_name in processing_lock:
+            try:
+                data = await asyncio.wait_for(websocket.receive_json(), timeout=20)  # Keep WebSocket alive
+                print(f"🌐 WebSocket received message: {data}")
+            except asyncio.TimeoutError:
+                await websocket.send_json({"status": "ping"})  # Keep alive every 20s
+
+    except WebSocketDisconnect:
+        print(f"🌐 WebSocket disconnected unexpectedly for {file_name}")
+    except Exception as e:
+        print(f"🌐 WebSocket error for {file_name}: {e}")
+    finally:
+        print(f"🌐 WebSocket cleanup triggered for {file_name}")
+        websocket_connections.pop(file_name, None)
+
+        # Only close the WebSocket if it hasn't already been closed
+        if not websocket_closed_flags.get(file_name, False):
+            await websocket.close()
+        else:
+            print(f"WebSocket for {file_name} already closed. Skipping duplicate closure.")
+
+        # Clean up the closed flag
+        websocket_closed_flags.pop(file_name, None)
 
 
 @app.post("/upload")
@@ -84,7 +179,6 @@ async def upload_file(file: UploadFile = File(...)):
     file_name = file.filename
     print(f"File uploaded: {file_name}")
 
-    file_result = {"filename": file_name}
     try:
         # Validate file formats
         if not is_allowed_file(file):
@@ -131,110 +225,35 @@ async def upload_file(file: UploadFile = File(...)):
         content={
             "status": "success",
             "message": "File processing completed.",
-            "processed_files": file_result
         }
     )
-
-
-# Manage WebSocket connections for flagged courses
-@app.websocket("/ws/flagged_courses/{file_name}")
-async def websocket_flagged_courses(websocket: WebSocket, file_name: str):
-    """
-    WebSocket connection for flagged courses. 
-    This opens before file processing starts and sends flagged courses when ready.
-    """
-    await websocket.accept()
-
-    file_name = decode_file_name(file_name)  # Decode spaces in filename
-    print(f"🌐 WebSocket connection established for {file_name}")
-
-    # Store WebSocket connection
-    websocket_connections[file_name] = websocket
-
-    try:
-        # Send initial connection confirmation
-        await websocket.send_json({"status": "connected", "file_name": file_name})
-
-        while True:
-            await asyncio.sleep(5)  # Keep connection alive with periodic sleep
-    except WebSocketDisconnect:
-        websocket_connections.pop(file_name, None)
-        print(f"🌐 WebSocket disconnected for {file_name}")
-
-
-# Send WebSocket notifications to frontend when flagged courses are ready
-async def notify_flagged_courses_ready(file_name: str):
-    """
-    Notify the frontend when flagged courses are ready.
-    """
-    ws = websocket_connections.get(file_name) # Get the WebSocket for this file
-    if not ws:
-        print(f"No WebSocket connection found for {file_name}.")
-        return
-
-    # Ensure the notification is for the correct file
-    if file_name not in processing_lock:
-        print(f"Ignoring notification for {file_name} as processing has completed.")
-        return
-
-    try:
-        await ws.send_json({"status": "ready", "file_name": file_name})
-        print(f"🌐 WebSocket notification sent for {file_name}")
-    except Exception as e:
-        print(f"🌐 Error sending WebSocket message for {file_name}: {e}")
-
-
-# Send WebSocket notifications to frontend when there are no flagged courses
-async def notify_no_flagged_courses(file_name: str):
-    """
-    Notify the frontend that no flagged courses were found.
-    The frontend should close the WebSocket and continue processing.
-    """
-    ws = websocket_connections.get(file_name)  # Get the WebSocket for this file
-    if not ws:
-        print(f"No WebSocket connection found for {file_name}.")
-        return
-
-    try:
-        await ws.send_json({"status": "no_flagged_courses", "file_name": file_name})
-        print(f"🌐 WebSocket notification sent: No flagged courses for {file_name}")
-
-        # Close the WebSocket connection
-        await ws.close()
-        websocket_connections.pop(file_name, None)
-    except Exception as e:
-        print(f"🌐 Error sending 'no flagged courses' WebSocket message for {file_name}: {e}")
 
 
 # Handle frontend requests for flagged courses
 @app.get("/get_flagged_courses")
 async def get_flagged_courses(file_name: str):
     """
-    Retrieve flagged courses for a file and send via WebSocket.
+    Retrieve flagged courses for a file and send via WebSocket. 
+    Retries if flagged courses are not yet available.
     """
     file_name = decode_file_name(file_name) # Decode spaces in filename
     print(f"Fetching flagged courses for {file_name}")
-    '''
-    max_retries = 10  # Limit retries
-    retries = 0
 
-    while retries < max_retries:
-        print(f"Retry {retries + 1} for flagged courses: {file_name}")
+    max_retries = 3  # Maximum number of retries
+    retry_delay = 1  # Delay between retries (in seconds)
+
+    for attempt in range(max_retries):
         flagged_courses = flagged_courses_store.get(file_name, [])
-        if flagged_courses:
-            # Send flagged courses through WebSocket
-            await notify_flagged_courses_ready(file_name)
-            return {"status": "success", "flagged_courses": flagged_courses}
 
-        await asyncio.sleep(1)
-        retries += 1
-    '''
-    flagged_courses = flagged_courses_store.get(file_name, [])
-    if flagged_courses:
-        return JSONResponse(
-            status_code=200,
-            content={"status": "success", "flagged_courses": flagged_courses}
-        )
+        if flagged_courses:
+            return JSONResponse(
+                status_code=200,
+                content={"status": "success", "flagged_courses": flagged_courses}
+            )
+
+        await asyncio.sleep(retry_delay)  # Wait before retrying
+
+    print(f"❌ No flagged courses found after {max_retries} attempts for {file_name}.")
     return JSONResponse(
         status_code=400,
         content={"status": "error", "message": f"No flagged courses found for {file_name}."}
@@ -242,23 +261,19 @@ async def get_flagged_courses(file_name: str):
 
 
 # Receives user decisions and resumes processing
-@app.post("/submit_flagged_decisions")
-async def submit_flagged_decisions(request: UserDecision):
+@app.post("/submit_user_decisions")
+async def submit_user_decisions(request: UserDecision):
     """
     Receive user decisions and resume processing.
     """
     file_name = decode_file_name(request.file_name) # Decode spaces in filename
-    print(f"Processing file: {file_name}")
-    print(f"Current processing_lock state: {processing_lock}")
-    print(f"Current flagged_courses_store state: {flagged_courses_store}")
-    
     decisions = request.decisions
     print(f"Receiving user decisions for {file_name}")
 
     if not file_name or file_name not in processing_lock:
         return JSONResponse(
             status_code=400,
-            content={"status": "error", "message": "No active processing found for this file."}
+            content={"status": "error", "message": "No active processing found."}
         )
 
     if not decisions:
@@ -270,19 +285,11 @@ async def submit_flagged_decisions(request: UserDecision):
     # Store user decisions
     user_decisions_store[file_name] = decisions
 
-    # Unlock processing and clean up state
-    if file_name in processing_lock:
-        processing_lock[file_name].set()  # Resume processing
-        del processing_lock[file_name]  # Ensure the lock is removed
-    if file_name in flagged_courses_store:
-        del flagged_courses_store[file_name]  # Clean up flagged courses
-
-    # Close WebSocket for the processed file
-    if file_name in websocket_connections:
-        ws = websocket_connections.pop(file_name, None)
-        if ws:
-            await ws.close()
-            print(f"🌐 WebSocket closed for {file_name}")
+    # Resume processing in data_pipeline.py
+    processing_lock[file_name].set() 
+    
+    #Notify frontend that processing is completed before closing WebSocket
+    await notify_status(file_name, "intentional_closure") 
 
     return JSONResponse(
         status_code=200,
@@ -291,7 +298,7 @@ async def submit_flagged_decisions(request: UserDecision):
 
 
 @app.post("/search")
-def search_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)):
+def search_transcripts(criteria: SearchCriteria):
     """
     Searches transcripts based on educator name, course category, degree level.
     Args:
@@ -300,11 +307,10 @@ def search_transcripts(criteria: SearchCriteria, conn=Depends(get_db_connection)
     Returns:
         JSONResponse: Queried results.
     """
-    criteria_dict = criteria.model_dump()
-    cursor = conn.cursor()
-
+    conn = get_db_connection()
     try:
-        results = query_transcripts(conn, criteria_dict)
+        cursor = conn.cursor()
+        results = query_transcripts(conn, criteria.model_dump())
             
         # Handling errors from query_transcripts()
         if results == "error":

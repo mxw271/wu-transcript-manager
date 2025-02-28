@@ -386,69 +386,57 @@ def openai_based_validation(data_dict) -> dict:
     
     try:
         # Validate Name Fields
-        corrected_names = validate_name_openai(
-            get_valid_value(data_dict.get("student", {}).get("first_name")),
-            get_valid_value(data_dict.get("student", {}).get("middle_name")),
-            get_valid_value(data_dict.get("student", {}).get("last_name"))
-        )
+        first_name = get_valid_value(data_dict.get("student", {}).get("first_name"))
+        middle_name = get_valid_value(data_dict.get("student", {}).get("middle_name"))
+        last_name = get_valid_value(data_dict.get("student", {}).get("last_name"))
+        corrected_names = validate_name_openai(first_name, middle_name, last_name) or {}
 
-        if corrected_names:
-            corrected_data["student"]["first_name"] = corrected_names.get("first_name", get_valid_value(data_dict["student"].get("first_name")))
-            corrected_data["student"]["middle_name"] = corrected_names.get("middle_name", get_valid_value(data_dict["student"].get("middle_name")))
-            corrected_data["student"]["last_name"] = corrected_names.get("last_name", get_valid_value(data_dict["student"].get("last_name")))
-        else:
-            corrected_data["student"] = data_dict["student"]  # Preserve original data if OpenAI fails
+        corrected_data["student"]["first_name"] = get_valid_value(corrected_names.get("first_name"), first_name)
+        corrected_data["student"]["middle_name"] = get_valid_value(corrected_names.get("middle_name"), middle_name)
+        corrected_data["student"]["last_name"] = get_valid_value(corrected_names.get("last_name"), last_name)
 
         # Validate and correct degrees
         for degree in data_dict.get("degrees", []):
             corrected_degree = {}
 
             # Validate Academic Information (Institution, Degree, Major, Minor)
-            corrected_academic_info = validate_academic_info_openai(
-                get_valid_value(degree.get("institution_name")),
-                get_valid_value(degree.get("degree")),
-                get_valid_value(degree.get("major")),
-                get_valid_value(degree.get("minor"))
-            ) 
+            institution_name = get_valid_value(degree.get("institution_name"))
+            degree_name = get_valid_value(degree.get("degree"))
+            major = get_valid_value(degree.get("major"))
+            minor = get_valid_value(degree.get("minor"))
+            corrected_academic_info = validate_academic_info_openai(institution_name, degree_name, major, minor) or {}
 
-            if corrected_academic_info:
-                corrected_degree["institution_name"] = corrected_academic_info.get("institution_name", get_valid_value(degree.get("institution_name")))
-                corrected_degree["degree"] = corrected_academic_info.get("degree", get_valid_value(degree.get("degree")))
-                corrected_degree["major"] = corrected_academic_info.get("major", get_valid_value(degree.get("major")))
-                corrected_degree["minor"] = corrected_academic_info.get("minor", get_valid_value(degree.get("minor")))
-            else:
-                corrected_degree["institution_name"] = degree.get("institution_name")
-                corrected_degree["degree"] = degree.get("degree")
-                corrected_degree["major"] = degree.get("major")
-                corrected_degree["minor"] = degree.get("minor")
+            corrected_degree["institution_name"] = get_valid_value(corrected_academic_info.get("institution_name"), institution_name)
+            corrected_degree["degree"] = get_valid_value(corrected_academic_info.get("degree"), degree_name)
+            corrected_degree["major"] = get_valid_value(corrected_academic_info.get("major"), major)
+            corrected_degree["minor"] = get_valid_value(corrected_academic_info.get("minor"), minor)
 
             # Validate Awarded Date
-            corrected_awarded_date = validate_awarded_date_openai(get_valid_value(degree.get("awarded_date"))) 
-            corrected_degree["awarded_date"] = corrected_awarded_date.get("awarded_date", get_valid_value(degree.get("awarded_date")))
+            original_awarded_date = get_valid_value(degree.get("awarded_date"))
+            corrected_awarded_date = validate_awarded_date_openai(original_awarded_date) or {}
+            corrected_degree["awarded_date"] = get_valid_value(corrected_awarded_date.get("awarded_date"), original_awarded_date)
 
             # Validate Overall Credits Earned & Overall GPA
-            corrected_performance = validate_academic_performance_openai(
-                get_valid_value(degree.get("overall_credits_earned"), None),
-                get_valid_value(degree.get("overall_gpa"), None)
-            ) 
+            overall_credits_earned = get_valid_value(degree.get("overall_credits_earned"), is_numeric=True)
+            overall_gpa = get_valid_value(degree.get("overall_gpa"), is_numeric=True)
+            corrected_performance = validate_academic_performance_openai(overall_credits_earned, overall_gpa) or {}
 
-            corrected_degree["overall_credits_earned"] = get_valid_value(corrected_performance.get("overall_credits_earned"), get_valid_value(degree.get("overall_credits_earned"), None))
-            corrected_degree["overall_gpa"] = get_valid_value(corrected_performance.get("overall_gpa"), get_valid_value(degree.get("overall_gpa"), None))
+            corrected_degree["overall_credits_earned"] = get_valid_value(corrected_performance.get("overall_credits_earned"), overall_credits_earned, is_numeric=True)
+            corrected_degree["overall_gpa"] = get_valid_value(corrected_performance.get("overall_gpa"), overall_gpa, is_numeric=True)
 
             # Validate Coursework (Course Name, Credits Earned, Grade)
             corrected_courses = []
 
             for course in degree.get("courses", []):
-                corrected_course = validate_coursework_openai(
-                    course.get("course_name", ""),
-                    course.get("credits_earned", ""),
-                    course.get("grade", "")
-                ) or {}
+                course_name = get_valid_value(course.get("course_name"))
+                credits_earned = get_valid_value(course.get("credits_earned"), is_numeric=True)
+                grade = get_valid_value(course.get("grade"))
+                corrected_course = validate_coursework_openai(course_name, credits_earned, grade) or {}
 
                 corrected_courses.append({
-                    "course_name": corrected_course.get("course_name", course.get("course_name", "")),
-                    "credits_earned": corrected_course.get("credits_earned", course.get("credits_earned")),
-                    "grade": corrected_course.get("grade", course.get("grade", ""))
+                    "course_name": get_valid_value(corrected_course.get("course_name"), course_name),
+                    "credits_earned": get_valid_value(corrected_course.get("credits_earned"), credits_earned, is_numeric=True),
+                    "grade": get_valid_value(corrected_course.get("grade"), grade)
                 })
 
             corrected_degree["courses"] = corrected_courses

@@ -264,7 +264,7 @@ def validate_data(data_dict: dict) -> dict:
 
 
 # Step 3: Structure validated data
-async def structure_data(data_dict: dict) -> dict:
+async def structure_data(data_dict: dict, processing_lock: dict) -> dict:
     """
     Reads the extracted transcript data, 
         matches course names to predefined categories using OpenAI, 
@@ -388,15 +388,14 @@ async def structure_data(data_dict: dict) -> dict:
         print(f"⚠️ User input required: Pausing processing for {file_name}. Waiting for user decisions...")
 
         # Store flagged courses and create lock for processing
-        from main import flagged_courses_store, processing_lock, user_decisions_store, notify_flagged_courses_ready
+        from main import flagged_courses_store, user_decisions_store, notify_status
         flagged_courses_store[file_name] = flagged_courses_list
 
         # Notify frontend via WebSocket
-        asyncio.create_task(notify_flagged_courses_ready(file_name))
+        asyncio.create_task(notify_status(file_name, "ready"))
 
-        # Create processing lock and wait for user input
-        processing_lock[file_name] = asyncio.Event()
-        await processing_lock[file_name].wait()
+        # wait until frontend submits decisions
+        await processing_lock[file_name].wait() 
 
         # Apply user decisions
         user_decisions = user_decisions_store.get(file_name, [])
@@ -426,19 +425,11 @@ async def structure_data(data_dict: dict) -> dict:
             
             print(f"User decisions applied successfully for {file_name}. Continue processing...")
 
-        # Clean up state
-        if file_name in processing_lock:
-            del processing_lock[file_name]
-        if file_name in flagged_courses_store:
-            del flagged_courses_store[file_name]
-
-    else:
-        # If no flagged courses, notify frontend to close WebSocket
-        print(f"No flagged courses for {file_name}. Notifying frontend to close WebSocket and continue processing.")
+    else: # If no flagged courses, notify frontend and close WebSocket
+        print(f"⚠️ No flagged courses for {file_name}. Notifying frontend and closing WebSocket...")
         
-        from main import notify_no_flagged_courses
-        asyncio.create_task(notify_no_flagged_courses(file_name))
-
+        from main import notify_status
+        asyncio.create_task(notify_status(file_name, "no_flagged_courses")) 
 
     # Iterate through each degree and process its courses with user decisions if available
     for degree in data_dict.get("degrees", []):
@@ -531,6 +522,11 @@ async def process_file(file_path: str, database_file: str) -> dict:
         dict: A response containing the status, message, and any error details.
     """
     async with global_lock:
+        # Create processing_lock for the file
+        from main import flagged_courses_store, user_decisions_store, processing_lock
+        file_name = os.path.basename(file_path)
+        processing_lock[file_name] = asyncio.Event()
+        
         # Determine the file type
         file_extension = os.path.splitext(file_path)[-1].lower()
         if file_extension not in ALLOWED_EXTENSIONS:
@@ -548,7 +544,7 @@ async def process_file(file_path: str, database_file: str) -> dict:
             print(f"📄 Extracting data from: {file_path}...")
             extraction_function = load_data if file_extension == ".csv" else extract_data
 
-            extraction_result = extraction_function(file_path)
+            extraction_result = await asyncio.to_thread(extraction_function, file_path)
             if extraction_result["status"] == "error":
                 return extraction_result  # Pass error response directly
 
@@ -563,7 +559,7 @@ async def process_file(file_path: str, database_file: str) -> dict:
             
             # Validate the data
             print("🔍 Validating extracted data...")
-            validation_result = validate_data(extracted_dict)
+            validation_result = await asyncio.to_thread(validate_data, extracted_dict)
             if validation_result["status"] == "error":
                 return validation_result  # Return validation error directly
 
@@ -578,7 +574,7 @@ async def process_file(file_path: str, database_file: str) -> dict:
 
             # Structure the data
             print("🔧 Structuring validated data...")
-            structured_result = await structure_data(validated_dict)
+            structured_result = await structure_data(validated_dict, processing_lock)
             if structured_result["status"] == "error":
                 return structured_result
 
@@ -593,7 +589,7 @@ async def process_file(file_path: str, database_file: str) -> dict:
 
             # Save the data to the database
             print("💾 Saving structured data to the database...")
-            saved_result = save_to_database(structured_dict, database_file)
+            saved_result = await asyncio.to_thread(save_to_database, structured_dict, database_file)
             if saved_result["status"] == "error":
                 return saved_result
 
@@ -604,7 +600,7 @@ async def process_file(file_path: str, database_file: str) -> dict:
             output_folder = Path(OUTPUT_FOLDER)
             for file in output_folder.iterdir():
                 if file.is_file() and file.name.startswith(file_prefix):
-                    file.unlink()  # Deletes the file
+                    await asyncio.to_thread(file.unlink)  # Deletes the file
 
             return {
                 "status": "success", 
@@ -622,3 +618,12 @@ async def process_file(file_path: str, database_file: str) -> dict:
                 "details": traceback.format_exc(),
                 "file": file_path
             }
+
+        finally:
+            # Clean up state after processing is complete
+            if file_name in processing_lock:
+                del processing_lock[file_name]
+            if file_name in flagged_courses_store:
+                del flagged_courses_store[file_name]
+            if file_name in user_decisions_store: 
+                del user_decisions_store[file_name]

@@ -112,11 +112,16 @@ def is_allowed_file(file):
     return True
 
 
-# Function to return a value if available, otherwise returns a default value
-def get_valid_value(value, default=""):
+# Function to return a valid value or None/empty string based on type
+def get_valid_value(value, default="", is_numeric=False):
     if value in [None, "", []]:  
-        return default  # Return empty string for text, None for numeric fields
-    return value
+        return None if is_numeric else default  # Return None for numeric fields, default for text fields
+    if is_numeric:
+        try:
+            return float(value)  # Convert to float
+        except ValueError:
+            return None  # If conversion fails, return None
+    return value  # Return as-is for string fields
 
 
 # Function to categorize degree levels
