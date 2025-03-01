@@ -181,9 +181,9 @@ def calculate_adjusted_credits(
 
 
 # Function to generate a hash for a row (excluding file_name)
-def generate_row_hash(first_name, last_name, institution_name, degree, major, minor, awarded_date, overall_credits_earned, overall_gpa, course_name, credits_earned, grade):
+def generate_row_hash(first_name, last_name, institution_name, degree, major, minor, awarded_date, overall_credits_earned, overall_gpa, course_name, grade):
     """Generates a hash for a row excluding file_name."""
-    hash_input = f"{first_name}|{last_name}|{institution_name}|{degree}|{major}|{minor}|{awarded_date}|{overall_credits_earned}|{overall_gpa}|{course_name}|{credits_earned}|{grade}"
+    hash_input = f"{first_name}|{last_name}|{institution_name}|{degree}|{major}|{minor}|{awarded_date}|{overall_credits_earned}|{overall_gpa}|{course_name}|{grade}"
     return hashlib.sha256(hash_input.encode()).hexdigest()
 
 

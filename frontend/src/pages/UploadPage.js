@@ -418,12 +418,12 @@ const UploadPage = () => {
   };
 
   // Handle user decision input changes
-  const handleDecisionChange = (fileName, degree, major, courseName, field, value) => {
+  const handleDecisionChange = (fileName, degree, major, courseName, courseIndex, field, value) => {
     setUploadStatus('Waiting for user decisions...');
     setUserDecisions(prev => ({
       ...prev,
-      [`${fileName}--${degree}--${major}--${courseName}`]: {
-        ...prev[`${fileName}--${degree}--${major}--${courseName}`],
+      [`${fileName}--${degree}--${major}--${courseName}--${courseIndex}`]: {
+        ...prev[`${fileName}--${degree}--${major}--${courseName}--${courseIndex}`],
         [field]: field === "credits_earned" ? (value === "" ? "" : value) : value
       }
     }));

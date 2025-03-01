@@ -13,13 +13,13 @@ import asyncio
 from asyncio import Lock
 
 from text_processing.extraction import extract_text_from_file_using_opencv, extract_text_from_file_using_azure
-from text_processing.formatting import generate_data_dict_using_openai, preprocess_data_dict, json_data_to_dataframe
+from text_processing.formatting import generate_data_dict_using_openai, deduplicate_courses, preprocess_data_dict, json_data_to_dataframe
 from text_processing.validation import rule_based_validation, validate_coursework_openai, openai_based_validation
 from text_processing.matching import match_courses_using_openai, match_courses_using_sbert
 from db_service import insert_records_from_dict
 from utils import (
     ALLOWED_EXTENSIONS, PASSING_GRADES, GRADE_RANKING, load_course_categories, get_valid_value, 
-    categorize_degree, calculate_adjusted_credits, generate_row_hash
+    categorize_degree, generate_row_hash
 )
 
 
@@ -173,7 +173,7 @@ def extract_data(file_path: str) -> dict:
                 "file": file_path
             }
 
-        # Add the file name to the DataFrame
+        # Add the file name to the dictionary
         data_dict["file_name"] = os.path.basename(file_path)
 
         print("Extracted data:", json.dumps(data_dict, indent=4))
@@ -213,8 +213,11 @@ def validate_data(data_dict: dict) -> dict:
         dict: A dictionary with status, message, and validated data.
     """
     try:
+        # Deduplicate courses based on course name, credits, and grade
+        deduplicated_dict = deduplicate_courses(data_dict)
+
         # Proprocess data before validation
-        preprocessed_dict = preprocess_data_dict(data_dict)
+        preprocessed_dict = preprocess_data_dict(deduplicated_dict)
 
         # Rule-based validation
         errors = rule_based_validation(preprocessed_dict)
@@ -450,7 +453,6 @@ async def structure_data(data_dict: dict, processing_lock: dict) -> dict:
                 get_valid_value(degree.get("overall_credits_earned"), None),
                 get_valid_value(degree.get("overall_gpa"), None),
                 course.get("course_name"),
-                course.get("credits_earned"),
                 course.get("grade")
             )
 
@@ -491,10 +493,10 @@ def save_to_database(data_dict: dict, database_file: str) -> dict:
         conn.commit()
         conn.close()
 
-        print(f"Data successfully saved to database: {result['inserted_count']} rows inserted, {len(result['duplicate_rows'])} duplicates skipped.")
+        print(f"Data successfully saved to database: {result['inserted_count']} rows inserted, {result['updated_count']} rows updated.")
         return {
             "status": "success",
-            "message": f"Data saved successfully: {result['inserted_count']} rows inserted, {len(result['duplicate_rows'])} duplicates skipped.",
+            "message": f"Data saved successfully: {result['inserted_count']} rows inserted, {result['updated_count']} rows updated.",
         }
 
     except Exception as e:

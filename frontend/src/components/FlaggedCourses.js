@@ -41,9 +41,9 @@ const FlaggedCourses = ({ flaggedCourses, userDecisions, handleDecisionChange, h
             </thead>
             <tbody>
               {degree.courses.map((course, index) => {
-                const decisionKey = `${degree.file_name}--${degree.degree}--${degree.major}--${course.course_name}`;
+                const decisionKey = `${degree.file_name}--${degree.degree}--${degree.major}--${course.course_name}--${index}`;
                 return (
-                  <tr key={index}>
+                  <tr key={decisionKey}>
                     <td>{course.course_name}</td>
 
                     {/* Display Category Fields Only If should_be_category Exists */}
@@ -55,7 +55,7 @@ const FlaggedCourses = ({ flaggedCourses, userDecisions, handleDecisionChange, h
                             className="select-category"
                             value={userDecisions[decisionKey]?.should_be_category ?? "Uncategorized"}
                             onChange={(e) => handleDecisionChange(
-                                degree.file_name, degree.degree, degree.major, course.course_name, 
+                                degree.file_name, degree.degree, degree.major, course.course_name, index,
                                 "should_be_category", e.target.value
                             )}
                           >
@@ -80,7 +80,7 @@ const FlaggedCourses = ({ flaggedCourses, userDecisions, handleDecisionChange, h
                             className="input-credit"
                             value={userDecisions[decisionKey]?.credits_earned === "" ? "" : userDecisions[decisionKey]?.credits_earned ?? ""}
                             onChange={(e) => handleDecisionChange(
-                                degree.file_name, degree.degree, degree.major, course.course_name, 
+                                degree.file_name, degree.degree, degree.major, course.course_name, index,
                                 "credits_earned", e.target.value === "" ? "" : e.target.value
                             )}
                           />
@@ -98,7 +98,7 @@ const FlaggedCourses = ({ flaggedCourses, userDecisions, handleDecisionChange, h
                             className="select-passed"
                             value={userDecisions[decisionKey]?.is_passed ?? "False"}
                             onChange={(e) => handleDecisionChange(
-                                degree.file_name, degree.degree, degree.major, course.course_name, 
+                                degree.file_name, degree.degree, degree.major, course.course_name, index,
                                 "is_passed", e.target.value
                             )}
                           >

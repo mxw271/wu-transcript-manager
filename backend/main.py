@@ -95,7 +95,7 @@ async def notify_status(file_name: str, status: str):
         
         # Close the WebSocket if the status indicates it's no longer needed
         if status in {"no_flagged_courses", "intentional_closure"}:
-            await asyncio.sleep(1)  # Give the frontend time to handle closure
+            await asyncio.sleep(3)  # Give the frontend time to handle closure
             await ws.close()
             websocket_connections.pop(file_name, None)
             websocket_closed_flags[file_name] = True
@@ -307,10 +307,12 @@ def search_transcripts(criteria: SearchCriteria):
     Returns:
         JSONResponse: Queried results.
     """
-    conn = get_db_connection()
     try:
+        conn = get_db_connection()
         cursor = conn.cursor()
-        results = query_transcripts(conn, criteria.model_dump())
+        
+        criteria_dict = criteria.model_dump()
+        results = query_transcripts(conn, criteria_dict)
             
         # Handling errors from query_transcripts()
         if results == "error":

@@ -122,7 +122,7 @@ def insert_transcript(
 
 
 # Function to insert a course
-def insert_course(
+def insert_or_update_course(
     conn: Connection, 
     transcript_id: int, 
     course_name: str, 
@@ -134,7 +134,7 @@ def insert_course(
     is_passed: bool = None,
 ) -> int:
     """
-    Inserts a new course into the courses table.
+    Inserts a new course or updates an existing one if a course with the same row_hash exists.
     Args:
         conn (Connection): Database connection object.
         transcript_id (int): The ID of the transcript (foreign key).
@@ -154,13 +154,33 @@ def insert_course(
     is_passed_value = None if is_passed is None else int(is_passed)
 
     # Check if a course with the same hash already exists
-    cursor.execute("SELECT course_id FROM courses WHERE row_hash = ?", (row_hash,))
+    cursor.execute("""
+        SELECT course_id, should_be_category, credits_earned, is_passed
+        FROM courses WHERE row_hash = ?""", (row_hash,))
     existing_course = cursor.fetchone()
-    if existing_course:
-        print(f"⚠️ Duplicate course detected: {course_name}. Skipping insertion.")
-        return existing_course[0]  # Return the existing course_id
 
-    # Insert new course
+    if existing_course:
+        course_id, old_category, old_credits, old_is_passed = existing_course
+
+        # Only update if any of these fields changed
+        if (
+            old_category != should_be_category or 
+            old_credits != credits_earned or 
+            old_is_passed != is_passed_value
+        ):
+            cursor.execute("""
+                UPDATE courses 
+                SET should_be_category = ?, adjusted_credits_earned = ?, credits_earned = ?, is_passed = ?
+                WHERE course_id = ?""",
+                (should_be_category, adjusted_credits_earned, credits_earned, is_passed_value, course_id)
+            )
+            conn.commit()
+        else:
+            print(f"No changes detected for course: {course_name}. Skipping update.")
+        
+        return course_id  # Return the existing course_id
+
+    # If no existing course, insert a new one
     cursor.execute(
         '''INSERT INTO courses (transcript_id, course_name, should_be_category, adjusted_credits_earned, row_hash, credits_earned, grade, is_passed)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -175,21 +195,21 @@ def insert_course(
 # Function to insert records from dict into database
 def insert_records_from_dict(conn, data_dict: dict, transcript_map: dict) -> dict:
     """
-    Inserts records from a structured dictionary into the database while handling duplicates.
+    Inserts records from a structured dictionary into the database while handling updates to existing records.
     Args:
         conn (sqlite3.Connection): Active database connection.
         data_dict (dict): Structured dictionary containing transcript data.
         transcript_map (dict): Cached mapping of file names to transcript IDs.
     Returns:
-        dict: A summary with counts of inserted and duplicate rows.
+        dict: A summary with counts of inserted and updated rows.
     """
     cursor = conn.cursor()
 
     # Get existing hashes from the database
     existing_hashes = set(row[0] for row in cursor.execute("SELECT row_hash FROM courses"))
 
-    duplicate_rows = []
     inserted_count = 0
+    updated_count = 0
     batch_size = 10  # Commit after every 10 insertions for performance
 
     try:
@@ -239,9 +259,8 @@ def insert_records_from_dict(conn, data_dict: dict, transcript_map: dict) -> dic
                     transcript_id = transcript[0]
                 else: # Insert transcript and get transcript_id
                     transcript_id = insert_transcript(
-                        conn, educator_id, institution_name, degree_level,
-                        file_name, degree_name, major, minor, awarded_date, 
-                        overall_credits_earned, overall_gpa
+                        conn, educator_id, institution_name, degree_level, file_name, degree_name, 
+                        major, minor, awarded_date, overall_credits_earned, overall_gpa
                     )
 
                 # Store transcript_id in map
@@ -251,14 +270,25 @@ def insert_records_from_dict(conn, data_dict: dict, transcript_map: dict) -> dic
             for course in degree.get("courses", []):
                 row_hash = course["row_hash"]
 
-                # Skip duplicates
+                # If course exists, update it
                 if row_hash in existing_hashes:
-                    duplicate_rows.append(row_hash)
-                    print(f"Skipping duplicate course: {course['course_name']}")
-                    continue
+                    print(f"Updating existing course: {course['course_name']}")
+                    course_id = insert_or_update_course(
+                        conn, transcript_id, 
+                        course["course_name"], 
+                        course["should_be_category"], 
+                        course["adjusted_credits_earned"], 
+                        course["row_hash"], 
+                        course["credits_earned"], 
+                        course["grade"],
+                        course["is_passed"]
+                    )
+                    if course_id:
+                        updated_count += 1
+                    continue  # Skip inserting new record
 
                 # Insert course record
-                course_id = insert_course(
+                course_id = insert_or_update_course(
                     conn, transcript_id, 
                     course["course_name"], 
                     course["should_be_category"], 
@@ -268,10 +298,11 @@ def insert_records_from_dict(conn, data_dict: dict, transcript_map: dict) -> dic
                     course["grade"],
                     course["is_passed"]
                 )
-
                 inserted_count += 1
-                if inserted_count % batch_size == 0:
-                    conn.commit()  # Commit periodically for performance
+
+                # Commit periodically for performance
+                if (inserted_count + updated_count) % batch_size == 0: 
+                    conn.commit()  
         
         conn.commit()  # Final commit for remaining transactions
 
@@ -282,7 +313,7 @@ def insert_records_from_dict(conn, data_dict: dict, transcript_map: dict) -> dic
 
     return {
         "inserted_count": inserted_count,
-        "duplicate_rows": duplicate_rows
+        "updated_count": updated_count
     }
 
 

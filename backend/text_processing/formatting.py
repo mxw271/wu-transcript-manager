@@ -124,6 +124,32 @@ def generate_data_dict_using_openai(text, temperature: float = TEMPERATURE):
         return None
 
 
+# Function to deduplicate courses in a dictionary
+def deduplicate_courses(data_dict):
+    """
+    Deduplicates courses within each degree in the data dictionary based on (course_name, credits_earned, grade).
+    Args:
+        data_dict (dict): Dictionary containing structured transcript data.
+    Returns:
+        dict: The cleaned dictionary with duplicates removed
+    """
+    for degree in data_dict.get("degrees", []):
+        unique_courses = []
+        seen_courses = set()
+
+        for course in degree.get("courses", []):
+            course_key = (course.get("course_name", ""), course.get("credits_earned", ""), course.get("grade", ""))
+            
+            if course_key not in seen_courses:
+                unique_courses.append(course)
+                seen_courses.add(course_key)
+
+        # Update the courses list with deduplicated records
+        degree["courses"] = unique_courses
+
+    return data_dict
+    
+
 # Function to format title case names while handling minor words
 def format_title(text):
     if not isinstance(text, str) or not text.strip():
