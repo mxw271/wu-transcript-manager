@@ -81,7 +81,7 @@ def extract_text_from_file_using_opencv(file_path, image_output_dir):
 
         extracted_text = []
         for image_name in sorted(images):  # Sort to process in page order
-            image_path = os.path.join(image_output_dir, image_name)
+            image_path = os.path.join(image_output_dir, image_name) if file_extension == ".pdf" else image_name
 
             # Read the image using OpenCV
             image = cv2.imread(image_path)

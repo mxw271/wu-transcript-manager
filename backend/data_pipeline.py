@@ -144,7 +144,6 @@ def extract_data(file_path: str) -> dict:
     """
     try:
         # Extract text from PDF
-        print("Extracting text from PDF...")
         extracted_text = extract_text_from_file_using_opencv(file_path, OUTPUT_FOLDER)
         if not extracted_text:
             return {
