@@ -20,7 +20,7 @@ cd ..
 :: --- Start Frontend Server --- 
 echo Starting React frontend in production mode...
 cd frontend
-start /b serve -s build -l 3000
+start /b npx serve -s build -l 3000
 timeout /t 3 >nul
 
 :: --- Open browser --- 
