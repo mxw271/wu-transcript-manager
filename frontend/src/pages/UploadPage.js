@@ -84,82 +84,102 @@ const UploadPage = () => {
 
   // Move to the next file in the queue
   const moveToNextFile = () => {
-    cleanupWebSocket(currentFileRef.current); // Clean up the WebSocket connection
-    webSocketClosedByBackendRef.current = false; // Reset the flag
-
-    setPendingFiles(prev => {
-      const updatedFiles = prev.slice(1); // Remove the first file
-      if (updatedFiles.length === 0) {
-        setUploadStatus("All files processed."); // All files completed
-        setCurrentFile(null);
-      } else {
-        setCurrentFile(updatedFiles[0].name); // Set the next file as the current file
-        setTimeout(() => processNextFile(), 500); // Allow state updates before processing next file
-      }
-      return updatedFiles;
+    cleanupWebSocket(currentFileRef.current, () => {
+      setPendingFiles(prev => {
+        const updatedFiles = prev.slice(1); // Remove the first file
+        if (updatedFiles.length === 0) {
+          setUploadStatus("All files processed."); // All files completed
+          setCurrentFile(null);
+        } else {
+          setCurrentFile(updatedFiles[0].name); // Set the next file as the current file
+          setTimeout(() => processNextFile(), 500); // Allow state updates before processing next file
+        }
+        return updatedFiles;
+      });
+  
+      setIsProcessing(false); // Mark processing as completed
     });
-
-    setIsProcessing(false); // Mark processing as completed
   };
 
   // Properly close the WebSocket connection and reset the weRef
-  const cleanupWebSocket = (fileName) => {
+  const cleanupWebSocket = (fileName, callback) => {
     if (wsRef.current && !webSocketClosedByBackendRef.current) {
-      console.log(`Cleaning up WebSocket for ${wsRef.current.fileName}`);
-      
+      console.log(`Cleaning up WebSocket for ${fileName}`);
+
       // Only close the WebSocket if it's still open
       if (wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.onclose = null;  // Prevent duplicate closures
-        setTimeout(() => wsRef.current.close(), 3000);  // Delay closure slightly
-        console.log(`WebSocket closed for ${fileName}`);
+        wsRef.current.onclose = null; // Prevent duplicate closures
+        setTimeout(() => {
+          wsRef.current.close();
+          console.log(`WebSocket closed for ${fileName}`);
+          
+          // Reset the WebSocket reference and remove from activeWebSockets
+          wsRef.current = null;
+          activeWebSockets.current.delete(fileName);
+          
+          // Reset the flag after the WebSocket is fully closed
+           webSocketClosedByBackendRef.current = false;
+
+          if (callback) callback(); // Execute callback after WebSocket is closed
+        }, 3000); // Delay closure slightly
+      
+      } else {
+        // If the WebSocket is already closed, reset the flag and execute the callback
+        wsRef.current = null;
+        activeWebSockets.current.delete(fileName);
+        webSocketClosedByBackendRef.current = false;
+        if (callback) callback(); // Execute callback immediately if WebSocket is already closed
       }
 
-      wsRef.current = null; // Reset the WebSocket reference
-      activeWebSockets.current.delete(fileName); // Remove all tracked WebSockets
+    } else {
+      // If no WebSocket is active, reset the flag and execute the callback
+      webSocketClosedByBackendRef.current = false;
+      if (callback) callback(); // Execute callback immediately if no WebSocket is active
     }
   };
 
   // Handles file selection and adds files to the processing queue
   const handleFileUpload = (event) => {
     // Reset states before handling new files
-    cleanupWebSocket(currentFileRef.current);
-    setProcessedFiles([]);
-    setCurrentFile(null);
-    setPendingFiles([]);
-    setInvalidFiles([]);
-    setUploadStatus('');
-    setFlaggedCourses([]);
-    setUserDecisions({});
-    setIsProcessing(false);
-    
-    setUploadStatus('Uploading...');
+    cleanupWebSocket(currentFileRef.current, () => {
+      setProcessedFiles([]);
+      setCurrentFile(null);
+      setPendingFiles([]);
+      setInvalidFiles([]);
+      setUploadStatus('');
+      setFlaggedCourses([]);
+      setUserDecisions({});
+      setIsProcessing(false);
+      
+      setUploadStatus('Uploading...');
 
-    const files = Array.from(event.target.files);
-    
-    // Enforce max file count
-    if (files.length > MAX_FILE_COUNT) {
-      setUploadStatus(`Error: You can upload up to ${MAX_FILE_COUNT} files at a time.`);
-      return;
-    }
-
-    // Separate valid and invalid files
-    const validFiles = [];
-    const invalidFiles = [];
-
-    files.forEach((file) => {
-      if (!ALLOWED_TYPES.includes(file.type) || file.size > MAX_FILE_SIZE) {
-        invalidFiles.push({
-          name: file.name,
-          reason: !ALLOWED_TYPES.includes(file.type) ? 'Unsupported format' : 'File size exceeds 5MB',
-        });
-      } else {
-        validFiles.push(file);
+      const files = Array.from(event.target.files);
+      
+      // Enforce max file count
+      if (files.length > MAX_FILE_COUNT) {
+        setUploadStatus(`Error: You can upload up to ${MAX_FILE_COUNT} files at a time.`);
+        return;
       }
-    });
 
-    // Update states for valid and invalid files
-    setInvalidFiles(invalidFiles);
-    setPendingFiles(prev => [...prev, ...validFiles]);
+      // Separate valid and invalid files
+      const validFiles = [];
+      const invalidFiles = [];
+
+      files.forEach((file) => {
+        if (!ALLOWED_TYPES.includes(file.type) || file.size > MAX_FILE_SIZE) {
+          invalidFiles.push({
+            name: file.name,
+            reason: !ALLOWED_TYPES.includes(file.type) ? 'Unsupported format' : 'File size exceeds 5MB',
+          });
+        } else {
+          validFiles.push(file);
+        }
+      });
+
+      // Update states for valid and invalid files
+      setInvalidFiles(invalidFiles);
+      setPendingFiles(prev => [...prev, ...validFiles]);
+    });
   };
 
   // Processes the next file in the queue sequentially
@@ -182,8 +202,10 @@ const UploadPage = () => {
       await setupWebSocketConnection(nextFile.name);
     } catch (error) {
       setUploadStatus(`Error setting up WebSocket for ${nextFile.name}.`);
-      markFileStatus(nextFile.name, "error", "WebSocket setup failed.");
-      moveToNextFile();
+      cleanupWebSocket(nextFile.name, () => {
+        markFileStatus(nextFile.name, "error", "WebSocket setup failed.");
+        moveToNextFile();
+      });
     }
   };
 
@@ -193,7 +215,7 @@ const UploadPage = () => {
 
     // Ensure file is unprocessed before setting up a WebSocket connection
     if (isProcessingRef.current || processedFiles.some(file => file.name === fileName)) return;
-
+    console.log(activeWebSockets.current);
     // Prevent multiple active WebSockets for the same file
     if (activeWebSockets.current.has(fileName)) {
       console.warn(`WebSocket already active for ${fileName}. Skipping duplicate connection.`);
@@ -206,6 +228,7 @@ const UploadPage = () => {
     console.log(`Opening WebSocket for ${fileName}`);
     const ws = setupWebSocket(fileName);
     if (ws) activeWebSockets.current.set(fileName, ws);
+    console.log(activeWebSockets.current);
   };
 
   // Sets up the WebSocket connection for the file being processed
@@ -222,7 +245,7 @@ const UploadPage = () => {
     const encodedFileName = Buffer.from(fileName).toString("base64");
     let ws = new WebSocket(`${WS_URL}/ws/flagged_courses/${encodedFileName}`);
     wsRef.current = ws; // Assign the WebSocket instance to wsRef.current
-  
+
     const MAX_RECONNECT_ATTEMPTS = 3; // Limit retries to prevent infinite loops
     const RECONNECT_DELAY = 3000; // Wait 3 seconds before reconnecting
     let keepAliveInterval;
@@ -231,17 +254,20 @@ const UploadPage = () => {
     const reconnectWebSocket = () => {
       if (reconnectAttemptsRef.current[fileName] >= MAX_RECONNECT_ATTEMPTS) {
         console.error(`Max WebSocket reconnect attempts reached for ${fileName}. Marking file as failed.`);
-        if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-          cleanupWebSocket(fileName);
-        }
-        markFileStatus(fileName, "error", "WebSocket reconnection failed.");
-        moveToNextFile();
+        cleanupWebSocket(fileName, () => {
+          markFileStatus(fileName, "error", "WebSocket reconnection failed.");
+          moveToNextFile();
+        });
         return;
       }
 
       console.log(`Reconnecting WebSocket for ${fileName}... Attempt ${reconnectAttemptsRef.current[fileName] + 1}`);
       reconnectAttemptsRef.current[fileName]++;
-      setTimeout(() => setupWebSocket(fileName), RECONNECT_DELAY); // Reconnect after delay
+
+      // Ensure the WebSocket is fully closed before reconnecting
+      cleanupWebSocket(fileName, () => {
+        setTimeout(() => setupWebSocket(fileName), RECONNECT_DELAY); // Reconnect after delay
+      });
     };
   
     ws.onopen = () => {
@@ -271,20 +297,21 @@ const UploadPage = () => {
         } else if (data.status === "intentional_closure") {
           console.log(`Backend intentionally closed WebSocket for ${fileName}. No further reconnection needed.`);
           webSocketClosedByBackendRef.current = true; 
-          if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-            wsRef.current.onclose = null; // Prevent duplicate closures
-            setTimeout(() => wsRef.current.close(), 3000); // 3-second delay
-          }
+
+          // Use cleanupWebSocket() to close the WebSocket and clean up
+          cleanupWebSocket(fileName, () => {
+            console.log(`WebSocket closed and cleaned up for ${fileName}`);
+          });
   
         } else if (data.status === "no_flagged_courses" && fileName === currentFileRef.current) {
           console.log(`No flagged courses for ${data.file_name}. Backend closed WebSocket and no further reconnection needed.`);
           webSocketClosedByBackendRef.current = true; 
-          if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-            wsRef.current.onclose = null; // Prevent duplicate closures
-            setTimeout(() => wsRef.current.close(), 3000); // 3-second delay
-          }
-          markFileStatus(fileName, "success", "No flagged courses found. File processing completed.");
-          moveToNextFile(); 
+
+          // Use cleanupWebSocket() to close the WebSocket and clean up
+          cleanupWebSocket(fileName, () => {
+            markFileStatus(fileName, "success", "No flagged courses found. File processing completed.");
+            moveToNextFile();
+          }); 
         }
       } catch (error) {
         console.error("WebSocket JSON parse error:", error);
@@ -297,12 +324,16 @@ const UploadPage = () => {
       // If the backend intentionally closed the WebSocket, do not reconnection
       if (webSocketClosedByBackendRef.current) {
         console.log(`WebSocket error occured after intentional closure for ${fileName}. No need to reconnect.`);
+        wsRef.current = null;
+        activeWebSockets.current.delete(fileName);
         return;
       }
   
       // If flagged courses were already received, continue handling user decisions
       if (flaggedCoursesReceived) {
         console.log("WebSocket error, but flagged courses already received. Ignoring error.");
+        wsRef.current = null;
+        activeWebSockets.current.delete(fileName);
         return;
       }
   
@@ -352,11 +383,10 @@ const UploadPage = () => {
     } catch (error) {
       const errorMessage = `Error processing ${nextFile.name}.`;
       setUploadStatus(`Error processing ${nextFile.name}.`);
-      if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-        cleanupWebSocket(nextFile.name);
-      }
-      markFileStatus(nextFile.name, "error", errorMessage || "File processing failed.");
-      moveToNextFile();
+      cleanupWebSocket(nextFile.name, () => {
+        markFileStatus(nextFile.name, "error", errorMessage || "File processing failed.");
+        moveToNextFile();
+      });
     }
   };
 
@@ -397,11 +427,10 @@ const UploadPage = () => {
         } else {
           console.error(`No flagged courses detected for ${fileName}. Marking file as failed.`);
           setUploadStatus(`No flagged courses detected for ${fileName}.`);
-          if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-            cleanupWebSocket(fileName);
-          }
-          markFileStatus(fileName, "error", "No flagged courses received.");
-          moveToNextFile();
+          cleanupWebSocket(fileName, () => {
+            markFileStatus(fileName, "error", "No flagged courses received.");
+            moveToNextFile();
+          });
         }
       }
 
@@ -409,11 +438,10 @@ const UploadPage = () => {
     } catch (error) {
       console.error("Error fetching flagged courses:", error);
       setUploadStatus(`Error: Unable to fetch flagged courses for ${fileName}`);
-      if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-        cleanupWebSocket(fileName);
-      }
-      markFileStatus(fileName, "error", "Failed to fetch flagged courses.");
-      moveToNextFile();
+      cleanupWebSocket(fileName, () => {
+        markFileStatus(fileName, "error", "Failed to fetch flagged courses.");
+        moveToNextFile();
+      });
     }
   };
 
@@ -464,29 +492,26 @@ const UploadPage = () => {
 
       if (response.status === "success") {
         alert(response.message || "Decisions submitted successfully!");
-        if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-          cleanupWebSocket(currentFileRef.current);
-        }
-        markFileStatus(currentFileRef.current, "success", `${response.message} File processing completed.`);
-        moveToNextFile();
+        cleanupWebSocket(currentFileRef.current, () => {
+          markFileStatus(currentFileRef.current, "success", `${response.message} File processing completed.`);
+          moveToNextFile();
+        });
 
       } else {
         alert(response.message || "Error submitting decisions. Please try again.");
-        if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-          cleanupWebSocket(currentFileRef.current);
-        }
-        markFileStatus(currentFileRef.current, "error", "Failed to fetch flagged courses.");
-        moveToNextFile();
+        cleanupWebSocket(currentFileRef.current, () => {
+          markFileStatus(currentFileRef.current, "error", "Failed to submit decisions.");
+          moveToNextFile();
+        });
       }
 
     } catch (error) {
       const errorMessage = `Error submitting decisions: ${error.message}`;
       alert(errorMessage);
-      if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-        cleanupWebSocket(currentFileRef.current);
-      }
-      markFileStatus(currentFileRef.current, "error", "Error submitting decisions.");
-      moveToNextFile();
+      cleanupWebSocket(currentFileRef.current, () => {
+        markFileStatus(currentFileRef.current, "error", "Error submitting decisions.");
+        moveToNextFile();
+      });
     }
   };
   
