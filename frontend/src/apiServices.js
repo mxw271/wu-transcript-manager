@@ -2,11 +2,7 @@ import axios from 'axios';
 import { Buffer } from 'buffer';
 
 // Set the base URL for API calls. FastAPI runs on port 8000 by default.
-const API_URL = process.env.REACT_API_URL || 'http://localhost:8000';
-
-
-// Track active uploads
-const activeUploads = new Set(); 
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 
 export const fetchCourseCategories = async () => {

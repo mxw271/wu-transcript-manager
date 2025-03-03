@@ -18,17 +18,17 @@ if lsof -i :8000 >/dev/null 2>&1; then
   kill -9 $(lsof -t -i :8000)
 fi
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload & 
-sleep 10
+sleep 6
 
 # --- Start Frontend Server --- 
-echo "🌐 Starting React frontend..."
+echo "🌐 Starting React frontend in production mode..."
 cd "$SCRIPT_DIR/frontend" || exit
 if lsof -i :3000 >/dev/null 2>&1; then
   echo "⚠️ Stopping existing frontend server..."
   kill -9 $(lsof -t -i :3000)
 fi
-npm start & 
-sleep 8
+serve -s build -l 3000 & 
+sleep 2
 
 # --- Completion Messages ---
 echo "🚀 Servers are running! Access the web app at: http://localhost:3000"

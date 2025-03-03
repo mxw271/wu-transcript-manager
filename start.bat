@@ -18,9 +18,9 @@ start /b uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 cd ..
 
 :: --- Start Frontend Server --- 
-echo Starting React frontend...
+echo Starting React frontend in production mode...
 cd frontend
-start /b npm start
+start /b serve -s build -l 3000
 cd ..
 
 :: --- Completion Messages ---
