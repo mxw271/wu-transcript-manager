@@ -21,6 +21,11 @@ cd ..
 echo Starting React frontend in production mode...
 cd frontend
 start /b serve -s build -l 3000
+timeout /t 3 >nul
+
+:: --- Open browser --- 
+echo Opening a browser...
+start http://localhost:3000
 cd ..
 
 :: --- Completion Messages ---

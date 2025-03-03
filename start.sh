@@ -30,6 +30,14 @@ fi
 serve -s build -l 3000 & 
 sleep 2
 
+# --- Open browser --- 
+echo "🌐 Opening a browser..."
+if which xdg-open > /dev/null; then
+  xdg-open http://localhost:3000
+elif which open > /dev/null; then
+  open http://localhost:3000
+fi
+
 # --- Completion Messages ---
 echo "🚀 Servers are running! Access the web app at: http://localhost:3000"
 echo "🔄 Leave this window open."
