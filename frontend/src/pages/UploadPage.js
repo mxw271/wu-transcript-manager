@@ -538,19 +538,8 @@ const UploadPage = () => {
         </div>
       )}
 
-      {/* Display errors for any invalid files */}
-      {invalidFiles.length > 0 && (
-        <div className="error-text">
-          <p>Invalid Files:</p>
-          <ul>
-            {invalidFiles.map((file, index) => (
-              <li key={index}>{file.name} - {file.reason}</li>
-            ))}
-          </ul>
-        </div>
-      )}
 
-      {/* Display files that have been processed */}
+      {/* Display files that are processing */}
       {pendingFiles.length > 0 && (
         <div>
           <p>Pending Files</p>
@@ -602,6 +591,18 @@ const UploadPage = () => {
                   <p className="error-text">{file.result.message}</p>
                 )}
               </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Display errors for any invalid files */}
+      {invalidFiles.length > 0 && (
+        <div className="error-text">
+          <p>Invalid Files:</p>
+          <ul>
+            {invalidFiles.map((file, index) => (
+              <li key={index}>{file.name} - {file.reason}</li>
             ))}
           </ul>
         </div>
