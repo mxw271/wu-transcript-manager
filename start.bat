@@ -15,13 +15,14 @@ call backend\venv\Scripts\activate
 echo Starting FastAPI backend...
 cd backend 
 start /b uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+timeout /t 6 >nul
 cd ..
 
 :: --- Start Frontend Server --- 
 echo Starting React frontend in production mode...
 cd frontend
 start /b npx serve -s build -l 3000
-timeout /t 3 >nul
+timeout /t 2 >nul
 
 :: --- Open browser --- 
 echo Opening a browser...
